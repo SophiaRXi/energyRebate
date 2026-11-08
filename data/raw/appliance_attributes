@@ -1,0 +1,11 @@
+model_id,attribute_name,attribute_value
+Rheem_XE40H06TT45U0,storage_volume,36
+Rheem_XE40H06TT45U0,draw_pattern,low
+Rheem_XE40H06TT45U0,fhr_rating,50
+Rheem_XE40H06TT45U0,recovery_efficiency,98
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,storage_volume,40
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,draw_pattern,high
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,fhr_rating,88
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,recovery_efficiency,97
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,power
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,direct

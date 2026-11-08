@@ -1,3 +1,5 @@
 model_id,category,brand,efficiency_rating
 AHRI-101,heat_pump,Bosch,4.5
 AHRI-102,induction_stove,LG,3.8
+Rheem_XE40H06TT45U0,water_heater,Rheem,0.81
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,water_heater,Friedrich,0.97

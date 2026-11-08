@@ -6,7 +6,7 @@
   "scripts": {
     "build:db": "python3 scripts/build_db.py",
     "start": "node backend/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/engine.test.js"
   },
   "repository": {
     "type": "git",

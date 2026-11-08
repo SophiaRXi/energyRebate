@@ -15,19 +15,29 @@ function evaluateRebates(zipCode, income, modelId) {
   // Epilog atoms must be strings: symbolp() is typeof === 'string', and a JS number is
   // treated as a compound term, so it never unifies with a variable or survives pluug.
   const safeModelId = String(modelId).toLowerCase();
-  const atom = (value) => String(value);
+  const atom = (value) => String(value).toLowerCase();
+  const category = candidates.appliance.category.toLowerCase();
 
-  // 1. Construct facts natively as JS arrays
+  // One fact per characteristic. Appliances that lack a trait (Rheem has no vent)
+  // simply do not get that predicate, so rules about it do not apply to them.
+  // storage_volume -> appliance_storagevolume. The shared efficiency column is
+  // UEF for water heaters and a generic efficiency rating for everything else.
   const facts = [
     ['user_zip', atom(zipCode)],
     ['user_income', atom(income)],
+    ['appliance', safeModelId],
+    ['appliance_type', safeModelId, category],
     [
-      'appliance_spec',
+      category === 'water_heater' ? 'appliance_uef' : 'appliance_efficiency',
       safeModelId,
-      candidates.appliance.category.toLowerCase(),
       atom(candidates.appliance.efficiency_rating)
     ]
   ];
+
+  for (const attr of candidates.attributes || []) {
+    const predicate = 'appliance_' + String(attr.attribute_name).toLowerCase().replace(/[^a-z0-9]/g, '');
+    facts.push([predicate, safeModelId, atom(attr.attribute_value)]);
+  }
 
   candidates.candidateRebates.forEach(r => {
     facts.push([
