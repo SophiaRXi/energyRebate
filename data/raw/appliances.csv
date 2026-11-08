@@ -1,0 +1,3 @@
+model_id,category,brand,efficiency_rating
+AHRI-101,heat_pump,Bosch,4.5
+AHRI-102,induction_stove,LG,3.8

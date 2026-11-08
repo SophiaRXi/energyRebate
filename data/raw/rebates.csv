@@ -1,0 +1,3 @@
+program_id,zip_code,category,min_efficiency,income_cap,amount
+pg_94102_hp,94102,heat_pump,4.0,95000,1000
+pg_94102_ind,94102,induction_stove,3.5,80000,500

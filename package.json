@@ -1,0 +1,31 @@
+{
+  "name": "energyrebate",
+  "version": "1.0.0",
+  "description": "Rebate eligibility and stackability engine using Epilog logic",
+  "main": "backend/server.js",
+  "scripts": {
+    "build:db": "python3 scripts/build_db.py",
+    "start": "node backend/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SophiaRXi/energyRebate.git"
+  },
+  "keywords": [
+    "epilog",
+    "rebates",
+    "logic-programming"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SophiaRXi/energyRebate/issues"
+  },
+  "homepage": "https://github.com/SophiaRXi/energyRebate#readme",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.3.0"
+  }
+}

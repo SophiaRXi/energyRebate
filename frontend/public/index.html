@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rebate Eligibility Checker</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem; max-width: 500px; }
+    .field { margin-bottom: 1rem; }
+    label { display: block; margin-bottom: 0.25rem; font-weight: bold; }
+    input, button { width: 100%; padding: 0.6rem; box-sizing: border-box; }
+    button { background-color: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; }
+    button:hover { background-color: #0052a3; }
+    #result { margin-top: 1.5rem; padding: 1rem; border: 1px solid #ccc; background: #f9f9f9; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h2>Energy Rebate Eligibility Checker</h2>
+  <form id="rebate-form">
+    <div class="field">
+      <label for="zipCode">ZIP Code</label>
+      <input type="text" id="zipCode" value="94102" required />
+    </div>
+    <div class="field">
+      <label for="income">Annual Household Income ($)</label>
+      <input type="number" id="income" value="75000" required />
+    </div>
+    <div class="field">
+      <label for="modelId">Appliance Model ID</label>
+      <input type="text" id="modelId" value="AHRI-101" required />
+    </div>
+    <button type="submit">Check Eligibility</button>
+  </form>
+
+  <div id="result" style="display:none;"></div>
+
+  <script>
+    document.getElementById('rebate-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        zipCode: document.getElementById('zipCode').value,
+        income: Number(document.getElementById('income').value),
+        modelId: document.getElementById('modelId').value
+      };
+
+      try {
+        const res = await fetch('/api/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        const resDiv = document.getElementById('result');
+        resDiv.style.display = 'block';
+        if (data.eligible) {
+          resDiv.innerHTML = `<h3>Eligible Programs Found</h3><pre>${JSON.stringify(data.matches, null, 2)}</pre>`;
+        } else {
+          resDiv.innerHTML = `<h3>Not Eligible</h3><p>No rebates matched your criteria.</p>`;
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Failed to connect to backend server.');
+      }
+    });
+  </script>
+</body>
+</html>
