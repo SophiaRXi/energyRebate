@@ -1,0 +1,8 @@
+program_id,attribute_name,operator,attribute_value
+pg_94102_hp,efficiency,gte,4.0
+pg_94102_ind,efficiency,gte,3.5
+pg_94102_wh,uef,gte,0.80
+pg_94102_wh_powervent,uef,gte,0.80
+pg_94102_wh_powervent,vent,eq,power
+pg_10001_hp,efficiency,gte,4.0
+pg_94102_ind_premium,efficiency,gte,3.7

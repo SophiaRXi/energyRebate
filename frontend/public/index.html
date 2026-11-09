@@ -5,62 +5,310 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rebate Eligibility Checker</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem; max-width: 500px; }
-    .field { margin-bottom: 1rem; }
-    label { display: block; margin-bottom: 0.25rem; font-weight: bold; }
-    input, button { width: 100%; padding: 0.6rem; box-sizing: border-box; }
-    button { background-color: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; }
-    button:hover { background-color: #0052a3; }
-    #result { margin-top: 1.5rem; padding: 1rem; border: 1px solid #ccc; background: #f9f9f9; border-radius: 4px; }
+    :root {
+      --ink: #1a2332;
+      --muted: #5a6a7a;
+      --line: #d7dee6;
+      --bg: #f3f6f9;
+      --panel: #ffffff;
+      --accent: #0b6e4f;
+      --accent-hover: #095c42;
+      --warn: #8a5a00;
+      --warn-bg: #fff6e5;
+      --bad: #8b1e1e;
+      --bad-bg: #fdecec;
+      --ok: #0b6e4f;
+      --ok-bg: #e8f6f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #d9efe6 0, transparent 28%),
+        linear-gradient(180deg, #eef3f7 0%, var(--bg) 40%, #e8edf2 100%);
+      min-height: 100vh;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 3rem;
+    }
+    h1 {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-weight: 600;
+      font-size: 2rem;
+      margin: 0 0 0.35rem;
+    }
+    .lede {
+      color: var(--muted);
+      margin: 0 0 1.5rem;
+      max-width: 40rem;
+    }
+    form, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 640px) {
+      .grid.three { grid-template-columns: 1fr 1fr 1fr; }
+      .grid.two { grid-template-columns: 1fr 1fr; }
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--line);
+      font: inherit;
+      background: #fff;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary {
+      background: #fff;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+    }
+    .status {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.2rem 0.45rem;
+      margin-bottom: 0.5rem;
+    }
+    .status.eligible { background: var(--ok-bg); color: var(--ok); }
+    .status.ineligible { background: var(--bad-bg); color: var(--bad); }
+    .status.needs_input { background: var(--warn-bg); color: var(--warn); }
+    .program {
+      border-top: 1px solid var(--line);
+      padding: 1rem 0;
+    }
+    .program:first-child { border-top: 0; padding-top: 0; }
+    .program h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+    }
+    .program ul {
+      margin: 0.4rem 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+    }
+    .meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+    #missing-panel { display: none; }
+    #result { display: none; }
   </style>
 </head>
 <body>
-  <h2>Energy Rebate Eligibility Checker</h2>
-  <form id="rebate-form">
-    <div class="field">
-      <label for="zipCode">ZIP Code</label>
-      <input type="text" id="zipCode" value="94102" required />
-    </div>
-    <div class="field">
-      <label for="income">Annual Household Income ($)</label>
-      <input type="number" id="income" value="75000" required />
-    </div>
-    <div class="field">
-      <label for="modelId">Appliance Model ID</label>
-      <input type="text" id="modelId" value="AHRI-101" required />
-    </div>
-    <button type="submit">Check Eligibility</button>
-  </form>
+  <main>
+    <h1>Energy Rebate Checker</h1>
+    <p class="lede">
+      Check which local rebate programs an appliance can claim. Answers you supply for missing
+      specs are used only for this check and are not saved to the appliance database.
+    </p>
 
-  <div id="result" style="display:none;"></div>
+    <form id="rebate-form">
+      <div class="grid three">
+        <div>
+          <label for="zipCode">ZIP Code</label>
+          <input type="text" id="zipCode" value="94102" required />
+        </div>
+        <div>
+          <label for="income">Household income ($)</label>
+          <input type="number" id="income" value="75000" required />
+        </div>
+        <div>
+          <label for="modelId">Appliance model ID</label>
+          <input type="text" id="modelId" value="UnknownVent_WH40" required />
+        </div>
+      </div>
+      <p class="hint">Try UnknownVent_WH40 to see a program that needs a vent type, or FRIEDRICH_PROP_G40-50_RH_HE_EC3 / Rheem_XE40H06TT45U0 / AHRI-101.</p>
+      <div style="margin-top: 1rem;">
+        <button type="submit">Check eligibility</button>
+      </div>
+    </form>
+
+    <section id="missing-panel" class="panel">
+      <h2 style="margin-top:0; font-size:1.15rem;">Missing appliance details</h2>
+      <p class="hint" style="margin-top:0;">
+        These values are required by one or more programs and are not in the database.
+        Filling them in re-runs eligibility for this session only.
+      </p>
+      <div id="missing-fields" class="grid two"></div>
+      <div style="margin-top: 1rem; display:grid; gap:0.5rem;">
+        <button type="button" id="recheck-btn">Re-check with these answers</button>
+        <button type="button" class="secondary" id="clear-overrides-btn">Clear session answers</button>
+      </div>
+    </section>
+
+    <section id="result" class="panel"></section>
+  </main>
 
   <script>
+    const sessionOverrides = {};
+
+    function collectFormPayload() {
+      return {
+        zipCode: document.getElementById('zipCode').value.trim(),
+        income: Number(document.getElementById('income').value),
+        modelId: document.getElementById('modelId').value.trim(),
+        overrides: { ...sessionOverrides }
+      };
+    }
+
+    function readMissingInputsIntoOverrides() {
+      document.querySelectorAll('[data-override-attr]').forEach(input => {
+        const name = input.getAttribute('data-override-attr');
+        const value = input.value.trim();
+        if (value) sessionOverrides[name] = value;
+        else delete sessionOverrides[name];
+      });
+    }
+
+    function renderMissingFields(missingAttributes, attributesUsed) {
+      const panel = document.getElementById('missing-panel');
+      const fields = document.getElementById('missing-fields');
+      if (!missingAttributes || missingAttributes.length === 0) {
+        panel.style.display = 'none';
+        fields.innerHTML = '';
+        return;
+      }
+
+      const known = Object.fromEntries(
+        (attributesUsed || []).map(a => [a.attribute_name, a.attribute_value])
+      );
+
+      fields.innerHTML = missingAttributes.map(attr => {
+        const current = sessionOverrides[attr] || known[attr] || '';
+        const options = attr === 'vent'
+          ? ['power', 'direct', 'atmospheric', 'unknown']
+          : null;
+        if (options) {
+          return `<div>
+            <label for="override-${attr}">${attr}</label>
+            <select id="override-${attr}" data-override-attr="${attr}">
+              <option value="">Select…</option>
+              ${options.map(o => `<option value="${o}" ${current === o ? 'selected' : ''}>${o}</option>`).join('')}
+            </select>
+          </div>`;
+        }
+        return `<div>
+          <label for="override-${attr}">${attr}</label>
+          <input id="override-${attr}" data-override-attr="${attr}" value="${current}" placeholder="Enter ${attr}" />
+        </div>`;
+      }).join('');
+      panel.style.display = 'block';
+    }
+
+    function renderResult(data) {
+      const resDiv = document.getElementById('result');
+      resDiv.style.display = 'block';
+
+      if (!data.found) {
+        resDiv.innerHTML = `<h2 style="margin-top:0;">Appliance not found</h2>
+          <p>No appliance with that model ID is in the database.</p>`;
+        renderMissingFields([], []);
+        return;
+      }
+
+      const overrideNote = (data.overridesApplied || []).length
+        ? `<p class="meta">Session answers applied (not saved): ${data.overridesApplied.join(', ')}</p>`
+        : '';
+
+      const knownAttrs = (data.attributesUsed || [])
+        .map(a => `${a.attribute_name}=${a.attribute_value}`)
+        .join(', ') || 'none';
+
+      const evaluations = (data.evaluations || []).map(e => {
+        const reasonList = (e.reasons || []).map(r => `<li>${r}</li>`).join('');
+        const missingList = (e.missingAttributes || []).map(m => `<li>Need value for <strong>${m}</strong></li>`).join('');
+        const details = reasonList || missingList
+          ? `<ul>${missingList}${reasonList}</ul>`
+          : `<ul><li>All known requirements are satisfied.</li></ul>`;
+        return `<article class="program">
+          <div class="status ${e.status}">${e.status.replace('_', ' ')}</div>
+          <h3>${e.program_id} — $${e.amount}</h3>
+          ${details}
+        </article>`;
+      }).join('') || '<p>No rebate programs cover this ZIP and appliance category.</p>';
+
+      resDiv.innerHTML = `
+        <h2 style="margin-top:0;">Results for ${data.appliance.brand} ${data.appliance.model_id}</h2>
+        <p class="meta">Category: ${data.appliance.category}. Attributes used: ${knownAttrs}.</p>
+        ${overrideNote}
+        ${evaluations}
+      `;
+
+      renderMissingFields(data.missingAttributes || [], data.attributesUsed || []);
+    }
+
+    async function runEvaluate() {
+      const payload = collectFormPayload();
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      renderResult(data);
+    }
+
     document.getElementById('rebate-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const payload = {
-        zipCode: document.getElementById('zipCode').value,
-        income: Number(document.getElementById('income').value),
-        modelId: document.getElementById('modelId').value
-      };
-
       try {
-        const res = await fetch('/api/evaluate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        
-        const resDiv = document.getElementById('result');
-        resDiv.style.display = 'block';
-        if (data.eligible) {
-          resDiv.innerHTML = `<h3>Eligible Programs Found</h3><pre>${JSON.stringify(data.matches, null, 2)}</pre>`;
-        } else {
-          resDiv.innerHTML = `<h3>Not Eligible</h3><p>No rebates matched your criteria.</p>`;
-        }
+        await runEvaluate();
       } catch (err) {
         console.error(err);
-        alert('Failed to connect to backend server.');
+        alert(err.message || 'Failed to connect to backend server.');
+      }
+    });
+
+    document.getElementById('recheck-btn').addEventListener('click', async () => {
+      readMissingInputsIntoOverrides();
+      try {
+        await runEvaluate();
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'Failed to re-check eligibility.');
+      }
+    });
+
+    document.getElementById('clear-overrides-btn').addEventListener('click', async () => {
+      Object.keys(sessionOverrides).forEach(k => delete sessionOverrides[k]);
+      try {
+        await runEvaluate();
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'Failed to re-check eligibility.');
       }
     });
   </script>

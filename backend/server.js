@@ -5,24 +5,26 @@ const { evaluateRebates } = require('./engine');
 const app = express();
 
 app.use(express.json());
-// Serve static files from frontend/public
 app.use(express.static(path.join(__dirname, '../frontend/public')));
 
-// Explicit route for home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/public/index.html'));
 });
 
 app.post('/api/evaluate', (req, res) => {
-  const { zipCode, income, modelId } = req.body;
+  const { zipCode, income, modelId, overrides } = req.body;
 
-  if (!zipCode || !income || !modelId) {
+  if (!zipCode || income === undefined || income === null || income === '' || !modelId) {
     return res.status(400).json({ error: 'Missing required fields: zipCode, income, modelId' });
   }
 
   try {
-    const matches = evaluateRebates(zipCode, Number(income), modelId);
-    res.json({ eligible: matches.length > 0, matches });
+    // overrides are request-scoped only; evaluateRebates never writes them to SQLite.
+    const result = evaluateRebates(zipCode, Number(income), modelId, overrides || {});
+    res.json({
+      eligible: result.matches.length > 0,
+      ...result
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

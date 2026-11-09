@@ -1,4 +1,7 @@
-program_id,zip_code,category,min_efficiency,income_cap,amount
-pg_94102_hp,94102,heat_pump,4.0,95000,1000
-pg_94102_ind,94102,induction_stove,3.5,80000,500
-pg_94102_wh,94102,water_heater,0.80,95000,800
+program_id,zip_code,category,income_cap,amount
+pg_94102_hp,94102,heat_pump,95000,1000
+pg_94102_ind,94102,induction_stove,80000,500
+pg_94102_wh,94102,water_heater,95000,800
+pg_94102_wh_powervent,94102,water_heater,95000,1200
+pg_10001_hp,10001,heat_pump,120000,750
+pg_94102_ind_premium,94102,induction_stove,100000,900
