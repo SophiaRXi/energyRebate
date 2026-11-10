@@ -4,7 +4,12 @@
   "description": "Rebate eligibility and stackability engine using Epilog logic",
   "main": "backend/server.js",
   "scripts": {
+    "fetch:energystar": "python3 scripts/fetch_energystar.py",
+    "import:energystar": "python3 scripts/import_energystar.py",
+    "enrich:retail": "python3 scripts/enrich_retail.py --apply-db",
+    "enrich:retail:seed": "python3 scripts/enrich_retail.py --seed-only --apply-db",
     "build:db": "python3 scripts/build_db.py",
+    "build:all": "npm run fetch:energystar && npm run import:energystar && npm run build:db && npm run enrich:retail:seed",
     "start": "node backend/server.js",
     "test": "node test/engine.test.js"
   },

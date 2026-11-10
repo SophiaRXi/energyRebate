@@ -1,17 +1,23 @@
-import sqlite3
+#!/usr/bin/env python3
+"""Build data/rebates.db from seed CSVs plus normalized ENERGY STAR imports."""
+
+from __future__ import annotations
+
 import csv
 import os
+import sqlite3
+from pathlib import Path
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+DB_PATH = PROJECT_ROOT / 'data' / 'rebates.db'
+RAW_DIR = PROJECT_ROOT / 'data' / 'raw'
+ES_NORMALIZED = RAW_DIR / 'energystar' / 'normalized'
 
-DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'rebates.db')
-RAW_DIR = os.path.join(PROJECT_ROOT, 'data', 'raw')
+os.makedirs(PROJECT_ROOT / 'data', exist_ok=True)
 
-os.makedirs(os.path.join(PROJECT_ROOT, 'data'), exist_ok=True)
-
-if os.path.exists(DB_PATH):
-    os.remove(DB_PATH)
+if DB_PATH.exists():
+    DB_PATH.unlink()
 
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
@@ -51,69 +57,161 @@ CREATE TABLE rebate_requirements (
 )
 ''')
 
+cursor.execute('''
+CREATE TABLE retail_listings (
+    model_id TEXT,
+    store TEXT,
+    product_name TEXT,
+    price REAL,
+    currency TEXT,
+    url TEXT,
+    model_number TEXT,
+    fetched_at TEXT,
+    match_score INTEGER,
+    PRIMARY KEY (model_id, store)
+)
+''')
+
 cursor.execute('CREATE INDEX idx_attr_model ON appliance_attributes(model_id)')
+cursor.execute('CREATE INDEX idx_attr_name_value ON appliance_attributes(attribute_name, attribute_value)')
 cursor.execute('CREATE INDEX idx_rebate_lookup ON rebates(zip_code, category)')
 cursor.execute('CREATE INDEX idx_req_program ON rebate_requirements(program_id)')
+cursor.execute('CREATE INDEX idx_appliances_category ON appliances(category)')
+cursor.execute('CREATE INDEX idx_retail_model ON retail_listings(model_id)')
 
-appliance_file = os.path.join(RAW_DIR, 'appliances.csv')
-with open(appliance_file, 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    for r in reader:
-        cursor.execute(
-            'INSERT INTO appliances VALUES (?, ?, ?)',
-            (r['model_id'].strip().lower(), r['category'].strip().lower(), r['brand'].strip())
-        )
 
-attr_file = next(
-    (p for p in (
-        os.path.join(RAW_DIR, 'appliance_attributes.csv'),
-        os.path.join(RAW_DIR, 'appliance_attributes'),
-    ) if os.path.exists(p)),
+def load_appliances(path: Path, seen: set[str]) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open('r', encoding='utf-8-sig', newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            model_id = row['model_id'].strip().lower()
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            cursor.execute(
+                'INSERT INTO appliances VALUES (?, ?, ?)',
+                (model_id, row['category'].strip().lower(), row['brand'].strip())
+            )
+            count += 1
+    return count
+
+
+def load_attributes(path: Path, valid_models: set[str]) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open('r', encoding='utf-8-sig', newline='') as handle:
+        reader = csv.DictReader(handle)
+        batch = []
+        for row in reader:
+            model_id = row['model_id'].strip().lower()
+            if model_id not in valid_models:
+                continue
+            batch.append((
+                model_id,
+                row['attribute_name'].strip().lower(),
+                row['attribute_value'].strip().lower(),
+            ))
+            if len(batch) >= 1000:
+                cursor.executemany('INSERT INTO appliance_attributes VALUES (?, ?, ?)', batch)
+                count += len(batch)
+                batch.clear()
+        if batch:
+            cursor.executemany('INSERT INTO appliance_attributes VALUES (?, ?, ?)', batch)
+            count += len(batch)
+    return count
+
+
+seen_models: set[str] = set()
+
+# Seed fixtures first so tests keep stable hand-authored model ids.
+seed_appliances = RAW_DIR / 'appliances.csv'
+seed_attrs = next(
+    (p for p in (RAW_DIR / 'appliance_attributes.csv', RAW_DIR / 'appliance_attributes') if p.exists()),
     None,
 )
-if attr_file:
-    with open(attr_file, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            cursor.execute(
-                'INSERT INTO appliance_attributes VALUES (?, ?, ?)',
-                (
-                    r['model_id'].strip().lower(),
-                    r['attribute_name'].strip().lower(),
-                    r['attribute_value'].strip().lower(),
-                )
-            )
 
-rebates_file = os.path.join(RAW_DIR, 'rebates.csv')
-with open(rebates_file, 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    for r in reader:
+seed_count = load_appliances(seed_appliances, seen_models)
+print(f'Loaded {seed_count:,} seed appliances')
+
+es_count = load_appliances(ES_NORMALIZED / 'appliances.csv', seen_models)
+print(f'Loaded {es_count:,} ENERGY STAR appliances')
+
+attr_count = 0
+if seed_attrs:
+    attr_count += load_attributes(seed_attrs, seen_models)
+attr_count += load_attributes(ES_NORMALIZED / 'appliance_attributes.csv', seen_models)
+print(f'Loaded {attr_count:,} appliance attributes')
+
+rebates_file = RAW_DIR / 'rebates.csv'
+with rebates_file.open('r', encoding='utf-8', newline='') as handle:
+    reader = csv.DictReader(handle)
+    for row in reader:
         cursor.execute(
             'INSERT INTO rebates VALUES (?, ?, ?, ?, ?)',
             (
-                r['program_id'].strip().lower(),
-                str(r['zip_code']).strip(),
-                r['category'].strip().lower(),
-                float(r['income_cap']),
-                float(r['amount']),
+                row['program_id'].strip().lower(),
+                str(row['zip_code']).strip(),
+                row['category'].strip().lower(),
+                float(row['income_cap']),
+                float(row['amount']),
             )
         )
 
-req_file = os.path.join(RAW_DIR, 'rebate_requirements.csv')
-if os.path.exists(req_file):
-    with open(req_file, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for r in reader:
+req_file = RAW_DIR / 'rebate_requirements.csv'
+if req_file.exists():
+    with req_file.open('r', encoding='utf-8', newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
             cursor.execute(
                 'INSERT INTO rebate_requirements VALUES (?, ?, ?, ?)',
                 (
-                    r['program_id'].strip().lower(),
-                    r['attribute_name'].strip().lower(),
-                    r['operator'].strip().lower(),
-                    r['attribute_value'].strip().lower(),
+                    row['program_id'].strip().lower(),
+                    row['attribute_name'].strip().lower(),
+                    row['operator'].strip().lower(),
+                    row['attribute_value'].strip().lower(),
                 )
             )
 
+retail_file = RAW_DIR / 'retail_listings.csv'
+retail_count = 0
+if retail_file.exists():
+    with retail_file.open('r', encoding='utf-8', newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            model_id = row['model_id'].strip().lower()
+            if model_id not in seen_models:
+                continue
+            price_raw = (row.get('price') or '').strip()
+            price = float(price_raw) if price_raw else None
+            cursor.execute(
+                'INSERT OR REPLACE INTO retail_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (
+                    model_id,
+                    row['store'].strip().lower(),
+                    row.get('product_name', '').strip(),
+                    price,
+                    (row.get('currency') or 'USD').strip(),
+                    row.get('url', '').strip(),
+                    row.get('model_number', '').strip(),
+                    row.get('fetched_at', '').strip(),
+                    int(row.get('match_score') or 0),
+                )
+            )
+            retail_count += 1
+print(f'Loaded {retail_count:,} retail listings')
+
 conn.commit()
+totals = {
+    'appliances': cursor.execute('SELECT COUNT(*) FROM appliances').fetchone()[0],
+    'attributes': cursor.execute('SELECT COUNT(*) FROM appliance_attributes').fetchone()[0],
+    'rebates': cursor.execute('SELECT COUNT(*) FROM rebates').fetchone()[0],
+    'requirements': cursor.execute('SELECT COUNT(*) FROM rebate_requirements').fetchone()[0],
+    'retail_listings': cursor.execute('SELECT COUNT(*) FROM retail_listings').fetchone()[0],
+}
 conn.close()
 print(f"Database successfully built at: {DB_PATH}")
+print(f"Totals: {totals}")

@@ -1,11 +1,20 @@
 model_id,attribute_name,attribute_value
-AHRI-101,efficiency,4.5
+AHRI-101,model_number,AHRI-101
+AHRI-101,model_name,Bosch IDS 2.0 Heat Pump
+AHRI-101,seer2,16.5
+AHRI-101,efficiency,16.5
+AHRI-102,model_number,AHRI-102
+AHRI-102,model_name,LG Studio Induction Cooktop
 AHRI-102,efficiency,3.8
+Rheem_XE40H06TT45U0,model_number,XE50T10H45U0
+Rheem_XE40H06TT45U0,model_name,Performance Platinum Hybrid Water Heater
 Rheem_XE40H06TT45U0,uef,0.81
 Rheem_XE40H06TT45U0,storage_volume,36
 Rheem_XE40H06TT45U0,draw_pattern,low
 Rheem_XE40H06TT45U0,fhr_rating,50
 Rheem_XE40H06TT45U0,recovery_efficiency,98
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,model_number,PROP G40-50 RH HE EC3
+FRIEDRICH_PROP_G40-50_RH_HE_EC3,model_name,Friedrich Power Direct Vent Water Heater
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,uef,0.97
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,storage_volume,40
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,draw_pattern,high
@@ -13,12 +22,21 @@ FRIEDRICH_PROP_G40-50_RH_HE_EC3,fhr_rating,88
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,recovery_efficiency,97
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,power
 FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,direct
+GE_GDE21DMKES,model_number,GDE21DMKES
+GE_GDE21DMKES,model_name,GE Profile Induction Range
 GE_GDE21DMKES,efficiency,3.6
-Carrier_25VNA436A003,efficiency,4.2
+Carrier_25VNA436A003,model_number,25VNA436A003
+Carrier_25VNA436A003,model_name,Carrier Infinity Heat Pump
+Carrier_25VNA436A003,seer2,14.0
+Carrier_25VNA436A003,efficiency,14.0
+AOSmith_HPTU66N,model_number,HPTU-66N
+AOSmith_HPTU66N,model_name,A. O. Smith Voltex Hybrid Electric Water Heater
 AOSmith_HPTU66N,uef,0.92
 AOSmith_HPTU66N,storage_volume,66
 AOSmith_HPTU66N,draw_pattern,high
 AOSmith_HPTU66N,vent,power
+UnknownVent_WH40,model_number,WH40-UNKNOWN
+UnknownVent_WH40,model_name,Generic 40 Gallon Water Heater
 UnknownVent_WH40,uef,0.88
 UnknownVent_WH40,storage_volume,40
 UnknownVent_WH40,draw_pattern,medium

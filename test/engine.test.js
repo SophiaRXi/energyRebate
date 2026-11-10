@@ -1,4 +1,4 @@
-const { evaluateRebates } = require('../backend/engine');
+const { evaluateRebates, discoverEligible } = require('../backend/engine');
 const assert = require('assert');
 
 console.log('Running Logic Engine Diagnostics...\n');
@@ -83,5 +83,29 @@ assert(
   'Test 7 Failed: Should explain efficiency shortfall'
 );
 console.log('✓ Test 7 Passed: Efficiency-as-attribute and failed threshold reason');
+
+// 8. Reverse discovery: income-eligible programs + sample appliances via unbound ModelID
+const res8 = discoverEligible('94102', 75000, { limit: 25 });
+assert.strictEqual(res8.mode, 'discover', 'Test 8 Failed: mode should be discover');
+assert(res8.eligible_program_count > 0, 'Test 8 Failed: expected income-eligible programs');
+const whProgram = res8.programs.find(p => p.program_id === 'pg_94102_wh');
+assert(whProgram && whProgram.status === 'eligible', 'Test 8 Failed: water heater program should be eligible');
+assert(
+  whProgram.appliances.some(a => a.model_id === 'rheem_xe40h06tt45u0' || a.brand === 'Rheem'),
+  'Test 8 Failed: Rheem seed water heater should appear in reverse results'
+);
+const hpProgram = res8.programs.find(p => p.program_id === 'pg_94102_hp');
+assert(
+  hpProgram && hpProgram.appliances.some(a => a.model_id === 'ahri-101'),
+  'Test 8 Failed: AHRI-101 should appear for heat pump program'
+);
+console.log('✓ Test 8 Passed: Reverse Epilog discovery of rebates and appliances');
+
+// 9. Reverse discovery respects income caps and category filters
+const res9 = discoverEligible('94102', 150000, { category: 'heat_pump' });
+assert.strictEqual(res9.programs.length, 1, 'Test 9 Failed: category filter should keep one program');
+assert.strictEqual(res9.programs[0].status, 'ineligible', 'Test 9 Failed: high income should block program');
+assert.strictEqual(res9.programs[0].appliances.length, 0, 'Test 9 Failed: ineligible program should list no appliances');
+console.log('✓ Test 9 Passed: Reverse discovery income + category filters');
 
 console.log('\nAll Engine Tests Passed Successfully!\n');

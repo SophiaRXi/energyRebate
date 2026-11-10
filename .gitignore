@@ -1,0 +1,15 @@
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local SQLite build artifact (can be ~1GB after ENERGY STAR import)
+data/rebates.db
+*.db
+
+data/es_catalog.json
+data/es_curl_err.txt
+data/raw/energystar/*.csv
+data/raw/energystar/normalized/
+!data/raw/energystar/manifest.json
+data/raw/scrape_probe_*

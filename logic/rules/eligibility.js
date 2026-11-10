@@ -1,6 +1,8 @@
 // Core eligibility. Program-specific attribute checks are encoded as
 // rebate_req_gte / rebate_req_eq facts and enforced by the missing/failed rules.
 const eligibilityRules = [
+  // Forward: bound ModelID → eligible programs.
+  // Reverse: unbound ModelID → eligible appliances for programs in the fact set.
   [
     'rule',
     ['eligible_rebate', 'ModelID', 'ProgramID', 'Amount'],
@@ -12,6 +14,16 @@ const eligibilityRules = [
     ['less', 'Income', 'IncomeCap'],
     ['not', ['missing_requirement', 'ModelID', 'ProgramID']],
     ['not', ['failed_requirement', 'ModelID', 'ProgramID']]
+  ],
+
+  // Reverse helper: which programs the household qualifies for before picking a model.
+  [
+    'rule',
+    ['eligible_program', 'ProgramID', 'Category', 'Amount', 'IncomeCap'],
+    ['rebate_program', 'ProgramID', 'ZipCode', 'Category', 'IncomeCap', 'Amount'],
+    ['user_zip', 'ZipCode'],
+    ['user_income', 'Income'],
+    ['less', 'Income', 'IncomeCap']
   ],
 
   // Missing: program asks for an attribute the appliance does not have at all.

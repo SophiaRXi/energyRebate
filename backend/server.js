@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { evaluateRebates } = require('./engine');
+const { evaluateRebates, discoverEligible } = require('./engine');
 
 const app = express();
 
@@ -19,12 +19,30 @@ app.post('/api/evaluate', (req, res) => {
   }
 
   try {
-    // overrides are request-scoped only; evaluateRebates never writes them to SQLite.
     const result = evaluateRebates(zipCode, Number(income), modelId, overrides || {});
     res.json({
       eligible: result.matches.length > 0,
       ...result
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/discover', (req, res) => {
+  const { zipCode, income, category, brand, limit } = req.body;
+
+  if (!zipCode || income === undefined || income === null || income === '') {
+    return res.status(400).json({ error: 'Missing required fields: zipCode, income' });
+  }
+
+  try {
+    const result = discoverEligible(zipCode, Number(income), {
+      category: category || null,
+      brand: brand || null,
+      limit: limit || 25
+    });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
