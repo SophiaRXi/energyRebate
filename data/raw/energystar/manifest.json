@@ -18,15 +18,6 @@
     "path": "data/raw/energystar/residential_clothes_washers.csv"
   },
   {
-    "id": "7p2p-wkbf",
-    "name": "ENERGY STAR Certified Smart Thermostats",
-    "slug": "smart_thermostats",
-    "permalink": "https://data.energystar.gov/d/7p2p-wkbf",
-    "file": "smart_thermostats.csv",
-    "bytes": 125900,
-    "path": "data/raw/energystar/smart_thermostats.csv"
-  },
-  {
     "id": "pk8q-dim8",
     "name": "ENERGY STAR Certified Commercial Dishwashers",
     "slug": "commercial_dishwashers",
@@ -45,15 +36,6 @@
     "path": "data/raw/energystar/residential_refrigerators.csv"
   },
   {
-    "id": "t9u7-4d2j",
-    "name": "ENERGY STAR Certified Residential Clothes Dryers",
-    "slug": "residential_clothes_dryers",
-    "permalink": "https://data.energystar.gov/d/t9u7-4d2j",
-    "file": "residential_clothes_dryers.csv",
-    "bytes": 272074,
-    "path": "data/raw/energystar/residential_clothes_dryers.csv"
-  },
-  {
     "id": "acvd-5wvz",
     "name": "ENERGY STAR Certified Geothermal Heat Pumps",
     "slug": "geothermal_heat_pumps",
@@ -63,42 +45,6 @@
     "path": "data/raw/energystar/geothermal_heat_pumps.csv"
   },
   {
-    "id": "6rww-hpns",
-    "name": "ENERGY STAR Certified Boilers",
-    "slug": "boilers",
-    "permalink": "https://data.energystar.gov/d/6rww-hpns",
-    "file": "boilers.csv",
-    "bytes": 124385,
-    "path": "data/raw/energystar/boilers.csv"
-  },
-  {
-    "id": "8dv7-nngq",
-    "name": "ENERGY STAR Certified Ventilating Fans",
-    "slug": "ventilating_fans",
-    "permalink": "https://data.energystar.gov/d/8dv7-nngq",
-    "file": "ventilating_fans.csv",
-    "bytes": 306295,
-    "path": "data/raw/energystar/ventilating_fans.csv"
-  },
-  {
-    "id": "t2v6-g4nf",
-    "name": "ENERGY STAR Certified Imaging Equipment",
-    "slug": "imaging_equipment",
-    "permalink": "https://data.energystar.gov/d/t2v6-g4nf",
-    "file": "imaging_equipment.csv",
-    "bytes": 882916,
-    "path": "data/raw/energystar/imaging_equipment.csv"
-  },
-  {
-    "id": "i97v-e8au",
-    "name": "ENERGY STAR Certified Furnaces",
-    "slug": "furnaces",
-    "permalink": "https://data.energystar.gov/d/i97v-e8au",
-    "file": "furnaces.csv",
-    "bytes": 836328,
-    "path": "data/raw/energystar/furnaces.csv"
-  },
-  {
     "id": "8t9c-g3tn",
     "name": "ENERGY STAR Certified Residential Freezers",
     "slug": "residential_freezers",
@@ -106,15 +52,6 @@
     "file": "residential_freezers.csv",
     "bytes": 193335,
     "path": "data/raw/energystar/residential_freezers.csv"
-  },
-  {
-    "id": "2te3-nmxp",
-    "name": "ENERGY STAR Certified Ceiling Fans",
-    "slug": "ceiling_fans",
-    "permalink": "https://data.energystar.gov/d/2te3-nmxp",
-    "file": "ceiling_fans.csv",
-    "bytes": 492322,
-    "path": "data/raw/energystar/ceiling_fans.csv"
   },
   {
     "id": "9g6r-cpdt",
@@ -144,141 +81,6 @@
     "path": "data/raw/energystar/room_air_conditioners.csv"
   },
   {
-    "id": "qbg3-d468",
-    "name": "ENERGY STAR Certified Displays",
-    "slug": "displays",
-    "permalink": "https://data.energystar.gov/d/qbg3-d468",
-    "file": "displays.csv",
-    "bytes": 1527097,
-    "path": "data/raw/energystar/displays.csv"
-  },
-  {
-    "id": "nak5-fsjf",
-    "name": "ENERGY STAR Certified Commercial Ice Machines",
-    "slug": "commercial_ice_machines",
-    "permalink": "https://data.energystar.gov/d/nak5-fsjf",
-    "file": "commercial_ice_machines.csv",
-    "bytes": 165443,
-    "path": "data/raw/energystar/commercial_ice_machines.csv"
-  },
-  {
-    "id": "edi8-b5vk",
-    "name": "ENERGY STAR Certified Commercial Fryers",
-    "slug": "commercial_fryers",
-    "permalink": "https://data.energystar.gov/d/edi8-b5vk",
-    "file": "commercial_fryers.csv",
-    "bytes": 44180,
-    "path": "data/raw/energystar/commercial_fryers.csv"
-  },
-  {
-    "id": "g242-ysjw",
-    "name": "ENERGY STAR Certified Laboratory Grade Refrigerators and Freezers",
-    "slug": "laboratory_grade_refrigerators_and_freezers",
-    "permalink": "https://data.energystar.gov/d/g242-ysjw",
-    "file": "laboratory_grade_refrigerators_and_freezers.csv",
-    "bytes": 399490,
-    "path": "data/raw/energystar/laboratory_grade_refrigerators_and_freezers.csv"
-  },
-  {
-    "id": "qifb-fcj2",
-    "name": "ENERGY STAR Certified Enterprise Servers",
-    "slug": "enterprise_servers",
-    "permalink": "https://data.energystar.gov/d/qifb-fcj2",
-    "file": "enterprise_servers.csv",
-    "bytes": 704641,
-    "path": "data/raw/energystar/enterprise_servers.csv"
-  },
-  {
-    "id": "bpzy-9tg8",
-    "name": "ENERGY STAR Certified Telephones",
-    "slug": "telephones",
-    "permalink": "https://data.energystar.gov/d/bpzy-9tg8",
-    "file": "telephones.csv",
-    "bytes": 113650,
-    "path": "data/raw/energystar/telephones.csv"
-  },
-  {
-    "id": "nw5s-r5ca",
-    "name": "ENERGY STAR Certified Commercial Griddles",
-    "slug": "commercial_griddles",
-    "permalink": "https://data.energystar.gov/d/nw5s-r5ca",
-    "file": "commercial_griddles.csv",
-    "bytes": 12141,
-    "path": "data/raw/energystar/commercial_griddles.csv"
-  },
-  {
-    "id": "e4mh-a2u3",
-    "name": "ENERGY STAR Certified Light Commercial HVAC",
-    "slug": "light_commercial_hvac",
-    "permalink": "https://data.energystar.gov/d/e4mh-a2u3",
-    "file": "light_commercial_hvac.csv",
-    "bytes": 4167880,
-    "path": "data/raw/energystar/light_commercial_hvac.csv"
-  },
-  {
-    "id": "wyw6-sr4d",
-    "name": "ENERGY STAR Certified Commercial Hot Food Holding Cabinet",
-    "slug": "commercial_hot_food_holding_cabinet",
-    "permalink": "https://data.energystar.gov/d/wyw6-sr4d",
-    "file": "commercial_hot_food_holding_cabinet.csv",
-    "bytes": 49255,
-    "path": "data/raw/energystar/commercial_hot_food_holding_cabinet.csv"
-  },
-  {
-    "id": "6xa2-5c2t",
-    "name": "ENERGY STAR Certified Commercial Coffee Brewers",
-    "slug": "commercial_coffee_brewers",
-    "permalink": "https://data.energystar.gov/d/6xa2-5c2t",
-    "file": "commercial_coffee_brewers.csv",
-    "bytes": 5030,
-    "path": "data/raw/energystar/commercial_coffee_brewers.csv"
-  },
-  {
-    "id": "wati-2tfp",
-    "name": "ENERGY STAR Certified Commercial Refrigerators and Freezers",
-    "slug": "commercial_refrigerators_and_freezers",
-    "permalink": "https://data.energystar.gov/d/wati-2tfp",
-    "file": "commercial_refrigerators_and_freezers.csv",
-    "bytes": 663969,
-    "path": "data/raw/energystar/commercial_refrigerators_and_freezers.csv"
-  },
-  {
-    "id": "vtsv-aq9u",
-    "name": "ENERGY STAR Certified Commercial Steam Cookers",
-    "slug": "commercial_steam_cookers",
-    "permalink": "https://data.energystar.gov/d/vtsv-aq9u",
-    "file": "commercial_steam_cookers.csv",
-    "bytes": 46654,
-    "path": "data/raw/energystar/commercial_steam_cookers.csv"
-  },
-  {
-    "id": "3uec-2gqf",
-    "name": "ENERGY STAR Certified Data Center Storage - Block I/O",
-    "slug": "data_center_storage_block_i_o",
-    "permalink": "https://data.energystar.gov/d/3uec-2gqf",
-    "file": "data_center_storage_block_i_o.csv",
-    "bytes": 57909,
-    "path": "data/raw/energystar/data_center_storage_block_i_o.csv"
-  },
-  {
-    "id": "pd96-rr3d",
-    "name": "ENERGY STAR Certified Televisions",
-    "slug": "televisions",
-    "permalink": "https://data.energystar.gov/d/pd96-rr3d",
-    "file": "televisions.csv",
-    "bytes": 110173,
-    "path": "data/raw/energystar/televisions.csv"
-  },
-  {
-    "id": "3393-mxju",
-    "name": "ENERGY STAR Certified Commercial Boilers",
-    "slug": "commercial_boilers",
-    "permalink": "https://data.energystar.gov/d/3393-mxju",
-    "file": "commercial_boilers.csv",
-    "bytes": 80739,
-    "path": "data/raw/energystar/commercial_boilers.csv"
-  },
-  {
     "id": "xmq6-bm79",
     "name": "ENERGY STAR Certified Commercial Water Heaters",
     "slug": "commercial_water_heaters",
@@ -286,15 +88,6 @@
     "file": "commercial_water_heaters.csv",
     "bytes": 173333,
     "path": "data/raw/energystar/commercial_water_heaters.csv"
-  },
-  {
-    "id": "j624-u8ux",
-    "name": "ENERGY STAR Certified Vending Machines",
-    "slug": "vending_machines",
-    "permalink": "https://data.energystar.gov/d/j624-u8ux",
-    "file": "vending_machines.csv",
-    "bytes": 20351,
-    "path": "data/raw/energystar/vending_machines.csv"
   },
   {
     "id": "q8py-6w3f",
@@ -306,87 +99,6 @@
     "path": "data/raw/energystar/residential_dishwashers.csv"
   },
   {
-    "id": "m8cf-pkii",
-    "name": "ENERGY STAR Certified Pool Pumps",
-    "slug": "pool_pumps",
-    "permalink": "https://data.energystar.gov/d/m8cf-pkii",
-    "file": "pool_pumps.csv",
-    "bytes": 160189,
-    "path": "data/raw/energystar/pool_pumps.csv"
-  },
-  {
-    "id": "n8cx-m62r",
-    "name": "ENERGY STAR Certified Large Network Equipment",
-    "slug": "large_network_equipment",
-    "permalink": "https://data.energystar.gov/d/n8cx-m62r",
-    "file": "large_network_equipment.csv",
-    "bytes": 65081,
-    "path": "data/raw/energystar/large_network_equipment.csv"
-  },
-  {
-    "id": "mgiu-hu4z",
-    "name": "ENERGY STAR Certified Dehumidifiers",
-    "slug": "dehumidifiers",
-    "permalink": "https://data.energystar.gov/d/mgiu-hu4z",
-    "file": "dehumidifiers.csv",
-    "bytes": 168152,
-    "path": "data/raw/energystar/dehumidifiers.csv"
-  },
-  {
-    "id": "ifxy-2uty",
-    "name": "ENERGY STAR Certified Uninterruptible Power Supplies",
-    "slug": "uninterruptible_power_supplies",
-    "permalink": "https://data.energystar.gov/d/ifxy-2uty",
-    "file": "uninterruptible_power_supplies.csv",
-    "bytes": 880713,
-    "path": "data/raw/energystar/uninterruptible_power_supplies.csv"
-  },
-  {
-    "id": "qaxz-ikcb",
-    "name": "ENERGY STAR Certified Storm Windows",
-    "slug": "storm_windows",
-    "permalink": "https://data.energystar.gov/d/qaxz-ikcb",
-    "file": "storm_windows.csv",
-    "bytes": 13084,
-    "path": "data/raw/energystar/storm_windows.csv"
-  },
-  {
-    "id": "c8av-ccf7",
-    "name": "ENERGY STAR Certified Commercial Ovens",
-    "slug": "commercial_ovens",
-    "permalink": "https://data.energystar.gov/d/c8av-ccf7",
-    "file": "commercial_ovens.csv",
-    "bytes": 144260,
-    "path": "data/raw/energystar/commercial_ovens.csv"
-  },
-  {
-    "id": "qsc8-7f7k",
-    "name": "ENERGY STAR Certified Water Coolers",
-    "slug": "water_coolers",
-    "permalink": "https://data.energystar.gov/d/qsc8-7f7k",
-    "file": "water_coolers.csv",
-    "bytes": 65159,
-    "path": "data/raw/energystar/water_coolers.csv"
-  },
-  {
-    "id": "put7-uu67",
-    "name": "ENERGY STAR Certified Data Center Storage - File I/O",
-    "slug": "data_center_storage_file_i_o",
-    "permalink": "https://data.energystar.gov/d/put7-uu67",
-    "file": "data_center_storage_file_i_o.csv",
-    "bytes": 28626,
-    "path": "data/raw/energystar/data_center_storage_file_i_o.csv"
-  },
-  {
-    "id": "5jwe-c8xm",
-    "name": "ENERGY STAR Certified Electric Vehicle Supply Equipment - AC-Output",
-    "slug": "electric_vehicle_supply_equipment_ac_output",
-    "permalink": "https://data.energystar.gov/d/5jwe-c8xm",
-    "file": "electric_vehicle_supply_equipment_ac_output.csv",
-    "bytes": 211327,
-    "path": "data/raw/energystar/electric_vehicle_supply_equipment_ac_output.csv"
-  },
-  {
     "id": "m6gi-ng33",
     "name": "ENERGY STAR Certified Residential Electric Cooking Products",
     "slug": "residential_electric_cooking_products",
@@ -394,68 +106,5 @@
     "file": "residential_electric_cooking_products.csv",
     "bytes": 107331,
     "path": "data/raw/energystar/residential_electric_cooking_products.csv"
-  },
-  {
-    "id": "gaa3-swy6",
-    "name": "ENERGY STAR Certified Room Air Cleaners V3.0",
-    "slug": "room_air_cleaners_v3_0",
-    "permalink": "https://data.energystar.gov/d/gaa3-swy6",
-    "file": "room_air_cleaners_v3_0.csv",
-    "bytes": 83979,
-    "path": "data/raw/energystar/room_air_cleaners_v3_0.csv"
-  },
-  {
-    "id": "ej6d-wb4c",
-    "name": "ENERGY STAR Certified Light Fixtures - Downlights",
-    "slug": "light_fixtures_downlights",
-    "permalink": "https://data.energystar.gov/d/ej6d-wb4c",
-    "file": "light_fixtures_downlights.csv",
-    "bytes": 2331435,
-    "path": "data/raw/energystar/light_fixtures_downlights.csv"
-  },
-  {
-    "id": "t3a6-mkxz",
-    "name": "ENERGY STAR Certified Electric Vehicle Supply Equipment - DC-Output",
-    "slug": "electric_vehicle_supply_equipment_dc_output",
-    "permalink": "https://data.energystar.gov/d/t3a6-mkxz",
-    "file": "electric_vehicle_supply_equipment_dc_output.csv",
-    "bytes": 283943,
-    "path": "data/raw/energystar/electric_vehicle_supply_equipment_dc_output.csv"
-  },
-  {
-    "id": "rxdj-2c88",
-    "name": "ENERGY STAR Certified Computers V9.0",
-    "slug": "computers_v9_0",
-    "permalink": "https://data.energystar.gov/d/rxdj-2c88",
-    "file": "computers_v9_0.csv",
-    "bytes": 1079868,
-    "path": "data/raw/energystar/computers_v9_0.csv"
-  },
-  {
-    "id": "kphf-22jd",
-    "name": "ENERGY STAR Certified Insulation",
-    "slug": "insulation",
-    "permalink": "https://data.energystar.gov/d/kphf-22jd",
-    "file": "insulation.csv",
-    "bytes": 3690,
-    "path": "data/raw/energystar/insulation.csv"
-  },
-  {
-    "id": "nt9t-yxu3",
-    "name": "ENERGY STAR Certified Commercial Electric Cooktops",
-    "slug": "commercial_electric_cooktops",
-    "permalink": "https://data.energystar.gov/d/nt9t-yxu3",
-    "file": "commercial_electric_cooktops.csv",
-    "bytes": 14572,
-    "path": "data/raw/energystar/commercial_electric_cooktops.csv"
-  },
-  {
-    "id": "wjtt-3zwd",
-    "name": "ENERGY STAR Certified Medical Imaging Equipment",
-    "slug": "medical_imaging_equipment",
-    "permalink": "https://data.energystar.gov/d/wjtt-3zwd",
-    "file": "medical_imaging_equipment.csv",
-    "bytes": 539,
-    "path": "data/raw/energystar/medical_imaging_equipment.csv"
   }
 ]

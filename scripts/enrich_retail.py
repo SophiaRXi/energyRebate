@@ -19,6 +19,7 @@ import argparse
 import csv
 import datetime as dt
 import html as html_lib
+import json
 import re
 import sqlite3
 import ssl
@@ -235,13 +236,9 @@ def load_targets(conn: sqlite3.Connection, limit: int, seed_only: bool) -> list[
         placeholders = ','.join('?' for _ in seeds)
         rows = cur.execute(
             f"""
-            SELECT a.model_id, a.brand, a.category,
-                   MAX(CASE WHEN attr.attribute_name='model_number' THEN attr.attribute_value END) AS model_number,
-                   MAX(CASE WHEN attr.attribute_name='model_name' THEN attr.attribute_value END) AS model_name
+            SELECT a.model_id, a.brand, a.category, a.model_number, a.attrs_json
             FROM appliances a
-            LEFT JOIN appliance_attributes attr ON attr.model_id = a.model_id
             WHERE a.model_id IN ({placeholders})
-            GROUP BY a.model_id
             ORDER BY a.brand, a.model_id
             """,
             seeds,
@@ -249,29 +246,34 @@ def load_targets(conn: sqlite3.Connection, limit: int, seed_only: bool) -> list[
     else:
         rows = cur.execute(
             """
-            SELECT a.model_id, a.brand, a.category,
-                   MAX(CASE WHEN attr.attribute_name='model_number' THEN attr.attribute_value END) AS model_number,
-                   MAX(CASE WHEN attr.attribute_name='model_name' THEN attr.attribute_value END) AS model_name
+            SELECT a.model_id, a.brand, a.category, a.model_number, a.attrs_json
             FROM appliances a
-            LEFT JOIN appliance_attributes attr ON attr.model_id = a.model_id
             WHERE a.category IN ('water_heater','heat_pump','induction_stove','electric_cooking')
-            GROUP BY a.model_id
             ORDER BY CASE WHEN a.model_id LIKE 'es-%' THEN 1 ELSE 0 END, a.brand, a.model_id
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
 
-    targets = [
-        {
+    targets = []
+    for r in rows:
+        model_name = ''
+        try:
+            attrs = json.loads(r[4] or '{}')
+            raw_name = attrs.get('model_name')
+            if isinstance(raw_name, list):
+                model_name = str(raw_name[0]) if raw_name else ''
+            elif raw_name:
+                model_name = str(raw_name)
+        except Exception:
+            model_name = ''
+        targets.append({
             'model_id': r[0],
             'brand': r[1] or '',
             'category': r[2] or '',
             'model_number': r[3] or '',
-            'model_name': r[4] or '',
-        }
-        for r in rows
-    ]
+            'model_name': model_name,
+        })
     return targets[:limit]
 
 

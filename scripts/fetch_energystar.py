@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Download all ENERGY STAR certified-product CSV datasets into data/raw/energystar/."""
+"""Download rebate-relevant ENERGY STAR certified-product CSVs.
+
+Only datasets mapped in catalog_config.ALLOWED_CATEGORIES are kept, so local
+disk stays small without paying for hosted storage.
+"""
 
 from __future__ import annotations
 
 import json
 import re
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -13,6 +18,10 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from catalog_config import is_allowed_dataset  # noqa: E402
+
 OUT_DIR = PROJECT_ROOT / 'data' / 'raw' / 'energystar'
 CATALOG_PATH = PROJECT_ROOT / 'data' / 'es_catalog.json'
 MANIFEST_PATH = OUT_DIR / 'manifest.json'
@@ -65,6 +74,7 @@ def main() -> None:
             raise
 
     datasets = []
+    skipped = 0
     for entry in catalog.get('results', []):
         resource = entry.get('resource', {})
         name = resource.get('name') or ''
@@ -74,6 +84,11 @@ def main() -> None:
         low = name.lower()
         if any(skip in low for skip in SKIP_NAME_SUBSTRINGS):
             print(f'  skip meta dataset: {name}')
+            skipped += 1
+            continue
+        if not is_allowed_dataset(name):
+            print(f'  skip non-rebate dataset: {name}')
+            skipped += 1
             continue
         datasets.append({
             'id': dataset_id,
@@ -82,7 +97,6 @@ def main() -> None:
             'permalink': entry.get('permalink') or entry.get('link'),
         })
 
-    # Stable unique filenames if two datasets slug-collide.
     used_slugs: dict[str, int] = {}
     for item in datasets:
         base = item['slug']
@@ -90,7 +104,13 @@ def main() -> None:
         used_slugs[base] = count + 1
         item['file'] = f'{base}.csv' if count == 0 else f'{base}_{count + 1}.csv'
 
-    print(f'Downloading {len(datasets)} product datasets…')
+    keep_files = {item['file'] for item in datasets}
+    for stale in OUT_DIR.glob('*.csv'):
+        if stale.name not in keep_files:
+            stale.unlink()
+            print(f'  removed unused CSV: {stale.name}')
+
+    print(f'Downloading {len(datasets)} rebate-relevant datasets (skipped {skipped})…')
     manifest = []
     for i, item in enumerate(datasets, start=1):
         dest = OUT_DIR / item['file']

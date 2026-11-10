@@ -1,55 +1,73 @@
 const Database = require('better-sqlite3');
-const path = require('path');
+const config = require('./config');
 
-const db = new Database(path.join(__dirname, '../data/rebates.db'));
+// Local SQLite today. When DATABASE_URL is set later, swap the client here and
+// keep the exported helpers stable for engine/server.
+const db = new Database(config.databasePath);
+
+const METRIC_COLUMNS = new Set([
+  'uef', 'seer2', 'eer2', 'hspf2', 'ceer', 'imef', 'efficiency'
+]);
+
+function expandAttrsJson(modelId, attrsJson, attributeNames = null) {
+  let attrs;
+  try {
+    attrs = JSON.parse(attrsJson || '{}');
+  } catch {
+    attrs = {};
+  }
+  if (!attrs || typeof attrs !== 'object') return [];
+
+  const wanted = attributeNames ? new Set(attributeNames.map(n => String(n).toLowerCase())) : null;
+  const rows = [];
+  for (const [name, value] of Object.entries(attrs)) {
+    if (wanted && !wanted.has(name)) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item === null || item === undefined || item === '') continue;
+        rows.push({ model_id: modelId, attribute_name: name, attribute_value: String(item) });
+      }
+    } else if (value !== null && value !== undefined && value !== '') {
+      rows.push({ model_id: modelId, attribute_name: name, attribute_value: String(value) });
+    }
+  }
+  return rows;
+}
 
 function findAppliance(modelId) {
   const key = String(modelId).trim();
   if (!key) return null;
 
   let appliance = db.prepare(
-    `SELECT model_id, category, brand
+    `SELECT model_id, category, brand, attrs_json
      FROM appliances
      WHERE LOWER(model_id) = LOWER(?)`
   ).get(key);
 
   if (appliance) return appliance;
 
-  // ENERGY STAR imports store the public model number as an attribute while
-  // using es-<unique_id> as the primary key.
   const byModelNumber = db.prepare(
-    `SELECT a.model_id, a.category, a.brand
-     FROM appliance_attributes attr
-     JOIN appliances a ON a.model_id = attr.model_id
-     WHERE attr.attribute_name = 'model_number'
-       AND LOWER(attr.attribute_value) = LOWER(?)
+    `SELECT model_id, category, brand, attrs_json
+     FROM appliances
+     WHERE LOWER(model_number) = LOWER(?)
      LIMIT 1`
   ).get(key);
 
   if (byModelNumber) return byModelNumber;
 
-  const byEnergyStarId = db.prepare(
-    `SELECT a.model_id, a.category, a.brand
-     FROM appliance_attributes attr
-     JOIN appliances a ON a.model_id = attr.model_id
-     WHERE attr.attribute_name = 'energystar_id'
-       AND LOWER(attr.attribute_value) = LOWER(?)
+  return db.prepare(
+    `SELECT model_id, category, brand, attrs_json
+     FROM appliances
+     WHERE LOWER(energystar_id) = LOWER(?)
      LIMIT 1`
-  ).get(key);
-
-  return byEnergyStarId || null;
+  ).get(key) || null;
 }
 
 function getCandidateFacts(modelId, zipCode) {
   const appliance = findAppliance(modelId);
   if (!appliance) return null;
 
-  const attributes = db.prepare(
-    `SELECT attribute_name, attribute_value
-     FROM appliance_attributes
-     WHERE model_id = ?`
-  ).all(appliance.model_id);
-
+  const attributes = expandAttrsJson(appliance.model_id, appliance.attrs_json);
   const categoryAliases = categoryAliasesFor(appliance.category, attributes);
   const placeholders = categoryAliases.map(() => '?').join(', ');
   const candidateRebates = db.prepare(
@@ -59,7 +77,16 @@ function getCandidateFacts(modelId, zipCode) {
   ).all(String(zipCode), ...categoryAliases);
 
   const requirements = getRequirementsForPrograms(candidateRebates.map(r => r.program_id));
-  return { appliance, attributes, candidateRebates, requirements };
+  return {
+    appliance: {
+      model_id: appliance.model_id,
+      category: appliance.category,
+      brand: appliance.brand
+    },
+    attributes,
+    candidateRebates,
+    requirements
+  };
 }
 
 function getRequirementsForPrograms(programIds) {
@@ -96,6 +123,45 @@ function categoriesMatchingRebate(rebateCategory) {
   return [cat];
 }
 
+function safeAttrName(name) {
+  const attr = String(name || '').toLowerCase();
+  if (!/^[a-z][a-z0-9_]*$/.test(attr)) {
+    throw new Error(`Unsupported attribute name: ${name}`);
+  }
+  return attr;
+}
+
+function appendRequirementFilters(sql, params, requirements) {
+  for (const req of requirements || []) {
+    const attr = safeAttrName(req.attribute_name);
+    const value = String(req.attribute_value).toLowerCase();
+    if (req.operator === 'gte') {
+      if (METRIC_COLUMNS.has(attr)) {
+        sql += ` AND a.${attr} IS NOT NULL AND a.${attr} >= CAST(? AS REAL)`;
+        params.push(value);
+      } else {
+        sql += ` AND CAST(json_extract(a.attrs_json, '$.${attr}') AS REAL) >= CAST(? AS REAL)`;
+        params.push(value);
+      }
+    } else if (req.operator === 'eq') {
+      if (attr === 'vent') {
+        sql += ` AND ('|' || COALESCE(a.vent, '') || '|') LIKE ?`;
+        params.push(`%|${value}|%`);
+      } else if (attr === 'cooking_top_technology') {
+        sql += ` AND LOWER(COALESCE(a.cooking_top_technology, '')) LIKE ?`;
+        params.push(`%${value}%`);
+      } else if (METRIC_COLUMNS.has(attr)) {
+        sql += ` AND CAST(a.${attr} AS TEXT) = ?`;
+        params.push(value);
+      } else {
+        sql += ` AND LOWER(CAST(json_extract(a.attrs_json, '$.${attr}') AS TEXT)) = ?`;
+        params.push(value);
+      }
+    }
+  }
+  return sql;
+}
+
 function buildAppliancePoolQuery(program, requirements, options = {}) {
   const brand = options.brand ? String(options.brand).trim().toLowerCase() : null;
   const categories = categoriesMatchingRebate(program.category);
@@ -103,7 +169,7 @@ function buildAppliancePoolQuery(program, requirements, options = {}) {
   const params = [...categories];
 
   let sql = `
-    SELECT DISTINCT a.model_id, a.category, a.brand
+    SELECT a.model_id, a.category, a.brand
     FROM appliances a
     WHERE a.category IN (${catPlaceholders})
   `;
@@ -123,42 +189,12 @@ function buildAppliancePoolQuery(program, requirements, options = {}) {
     sql += `
       AND (
         a.category = 'induction_stove'
-        OR EXISTS (
-          SELECT 1 FROM appliance_attributes ind
-          WHERE ind.model_id = a.model_id
-            AND ind.attribute_name = 'cooking_top_technology'
-            AND ind.attribute_value LIKE '%induction%'
-        )
+        OR LOWER(COALESCE(a.cooking_top_technology, '')) LIKE '%induction%'
       )
     `;
   }
 
-  for (const req of requirements || []) {
-    const attr = String(req.attribute_name).toLowerCase();
-    const value = String(req.attribute_value).toLowerCase();
-    if (req.operator === 'gte') {
-      sql += `
-        AND EXISTS (
-          SELECT 1 FROM appliance_attributes req_attr
-          WHERE req_attr.model_id = a.model_id
-            AND req_attr.attribute_name = ?
-            AND CAST(req_attr.attribute_value AS REAL) >= CAST(? AS REAL)
-        )
-      `;
-      params.push(attr, value);
-    } else if (req.operator === 'eq') {
-      sql += `
-        AND EXISTS (
-          SELECT 1 FROM appliance_attributes req_attr
-          WHERE req_attr.model_id = a.model_id
-            AND req_attr.attribute_name = ?
-            AND req_attr.attribute_value = ?
-        )
-      `;
-      params.push(attr, value);
-    }
-  }
-
+  sql = appendRequirementFilters(sql, params, requirements);
   sql += `
     ORDER BY a.brand COLLATE NOCASE, a.model_id
     LIMIT ?
@@ -171,75 +207,12 @@ function getEnergyStarAppliancesForProgram(program, requirements, options = {}) 
   const limit = options.limit;
   if (limit <= 0) return [];
 
-  const categories = categoriesMatchingRebate(program.category);
-  const brand = options.brand ? String(options.brand).trim().toLowerCase() : null;
-  const gteReq = (requirements || []).find(r => r.operator === 'gte');
-  const eqReqs = (requirements || []).filter(r => r.operator === 'eq');
-
-  // Attribute-first query: starting from appliances over 300k rows with EXISTS
-  // filters is too slow. Drive from the indexed attribute table instead.
-  let sql;
-  const params = [];
-
-  if (gteReq) {
-    sql = `
-      SELECT a.model_id, a.category, a.brand
-      FROM appliance_attributes pivot
-      JOIN appliances a ON a.model_id = pivot.model_id
-      WHERE pivot.attribute_name = ?
-        AND CAST(pivot.attribute_value AS REAL) >= CAST(? AS REAL)
-        AND a.model_id LIKE 'es-%'
-        AND a.category IN (${categories.map(() => '?').join(', ')})
-    `;
-    params.push(
-      String(gteReq.attribute_name).toLowerCase(),
-      String(gteReq.attribute_value).toLowerCase(),
-      ...categories
-    );
-  } else {
-    sql = `
-      SELECT a.model_id, a.category, a.brand
-      FROM appliances a
-      WHERE a.model_id LIKE 'es-%'
-        AND a.category IN (${categories.map(() => '?').join(', ')})
-    `;
-    params.push(...categories);
-  }
-
-  if (brand) {
-    sql += ' AND LOWER(a.brand) = ?';
-    params.push(brand);
-  }
-
-  for (const req of eqReqs) {
-    sql += `
-      AND EXISTS (
-        SELECT 1 FROM appliance_attributes eq_attr
-        WHERE eq_attr.model_id = a.model_id
-          AND eq_attr.attribute_name = ?
-          AND eq_attr.attribute_value = ?
-      )
-    `;
-    params.push(String(req.attribute_name).toLowerCase(), String(req.attribute_value).toLowerCase());
-  }
-
-  if (program.category === 'induction_stove') {
-    sql += `
-      AND (
-        a.category = 'induction_stove'
-        OR EXISTS (
-          SELECT 1 FROM appliance_attributes ind
-          WHERE ind.model_id = a.model_id
-            AND ind.attribute_name = 'cooking_top_technology'
-            AND ind.attribute_value LIKE '%induction%'
-        )
-      )
-    `;
-  }
-
-  sql += ' ORDER BY a.brand COLLATE NOCASE, a.model_id LIMIT ?';
-  params.push(limit);
-  return db.prepare(sql).all(...params);
+  const query = buildAppliancePoolQuery(program, requirements, {
+    ...options,
+    limit,
+    esOnly: true
+  });
+  return db.prepare(query.sql).all(...query.params);
 }
 
 /**
@@ -268,20 +241,17 @@ function getAppliancesForProgram(program, requirements, options = {}) {
 function getAttributesForModels(modelIds, attributeNames = null) {
   if (!modelIds || modelIds.length === 0) return [];
   const placeholders = modelIds.map(() => '?').join(', ');
-  if (attributeNames && attributeNames.length > 0) {
-    const attrPlaceholders = attributeNames.map(() => '?').join(', ');
-    return db.prepare(
-      `SELECT model_id, attribute_name, attribute_value
-       FROM appliance_attributes
-       WHERE model_id IN (${placeholders})
-         AND attribute_name IN (${attrPlaceholders})`
-    ).all(...modelIds, ...attributeNames);
-  }
-  return db.prepare(
-    `SELECT model_id, attribute_name, attribute_value
-     FROM appliance_attributes
+  const rows = db.prepare(
+    `SELECT model_id, attrs_json
+     FROM appliances
      WHERE model_id IN (${placeholders})`
   ).all(...modelIds);
+
+  const out = [];
+  for (const row of rows) {
+    out.push(...expandAttrsJson(row.model_id, row.attrs_json, attributeNames));
+  }
+  return out;
 }
 
 function getRetailListings(modelIds) {
@@ -295,14 +265,12 @@ function getRetailListings(modelIds) {
        ORDER BY store`
     ).all(...modelIds);
   } catch (err) {
-    // Older DBs from before retail enrichment simply have no table yet.
     if (String(err.message || '').includes('no such table')) return [];
     throw err;
   }
 }
 
 function buildDisplayName(appliance, attrsByName, retailRows) {
-  // Prefer curated/catalog title, then a high-confidence store title.
   const catalog = (retailRows || []).find(r => r.store === 'catalog' && r.product_name);
   if (catalog) return prettyLabel(catalog.product_name);
 
@@ -356,7 +324,7 @@ function getApplianceSummaries(modelIds) {
   if (!modelIds || modelIds.length === 0) return [];
   const placeholders = modelIds.map(() => '?').join(', ');
   const appliances = db.prepare(
-    `SELECT model_id, category, brand
+    `SELECT model_id, category, brand, model_number, attrs_json
      FROM appliances
      WHERE model_id IN (${placeholders})`
   ).all(...modelIds);
@@ -366,7 +334,6 @@ function getApplianceSummaries(modelIds) {
     'uef', 'seer2', 'efficiency', 'vent', 'storage_volume',
     'draw_pattern', 'fhr_rating', 'cooking_top_technology', 'imef', 'ceer'
   ];
-  const attrs = getAttributesForModels(modelIds, highlightNames);
   const retail = getRetailListings(modelIds);
   const retailByModel = new Map();
   for (const row of retail) {
@@ -378,7 +345,7 @@ function getApplianceSummaries(modelIds) {
     model_id: a.model_id,
     category: a.category,
     brand: a.brand,
-    model_number: null,
+    model_number: a.model_number || null,
     model_name: null,
     display_name: null,
     prices: [],
@@ -388,19 +355,24 @@ function getApplianceSummaries(modelIds) {
   const highlightSet = new Set(highlightNames);
   const attrsByModel = new Map();
 
-  for (const attr of attrs) {
-    const row = byModel.get(attr.model_id);
+  for (const appliance of appliances) {
+    const attrs = expandAttrsJson(appliance.model_id, appliance.attrs_json, highlightNames);
+    const row = byModel.get(appliance.model_id);
     if (!row) continue;
-    if (!attrsByModel.has(attr.model_id)) attrsByModel.set(attr.model_id, {});
-    attrsByModel.get(attr.model_id)[attr.attribute_name] = attr.attribute_value;
+    if (!attrsByModel.has(appliance.model_id)) attrsByModel.set(appliance.model_id, {});
 
-    if (attr.attribute_name === 'model_number') row.model_number = attr.attribute_value;
-    if (attr.attribute_name === 'model_name') row.model_name = attr.attribute_value;
-    if (highlightSet.has(attr.attribute_name) && attr.attribute_name !== 'model_number' && attr.attribute_name !== 'model_name') {
-      if (!row.highlights[attr.attribute_name]) {
-        row.highlights[attr.attribute_name] = attr.attribute_value;
-      } else if (!String(row.highlights[attr.attribute_name]).split('|').includes(attr.attribute_value)) {
-        row.highlights[attr.attribute_name] += `|${attr.attribute_value}`;
+    for (const attr of attrs) {
+      attrsByModel.get(attr.model_id)[attr.attribute_name] = attr.attribute_value;
+      if (attr.attribute_name === 'model_number') row.model_number = attr.attribute_value;
+      if (attr.attribute_name === 'model_name') row.model_name = attr.attribute_value;
+      if (highlightSet.has(attr.attribute_name)
+          && attr.attribute_name !== 'model_number'
+          && attr.attribute_name !== 'model_name') {
+        if (!row.highlights[attr.attribute_name]) {
+          row.highlights[attr.attribute_name] = attr.attribute_value;
+        } else if (!String(row.highlights[attr.attribute_name]).split('|').includes(attr.attribute_value)) {
+          row.highlights[attr.attribute_name] += `|${attr.attribute_value}`;
+        }
       }
     }
   }

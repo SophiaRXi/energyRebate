@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Normalize downloaded ENERGY STAR CSVs into appliances + attribute rows.
+Normalize downloaded ENERGY STAR CSVs into a compact local catalog.
 
 Outputs:
   data/raw/energystar/normalized/appliances.csv
-  data/raw/energystar/normalized/appliance_attributes.csv
+
+Each row stores only rebate-relevant categories and a slim attrs_json blob so the
+local SQLite build stays small while remaining easy to move to a hosted DB later.
 """
 
 from __future__ import annotations
@@ -12,10 +14,19 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from catalog_config import (  # noqa: E402
+    ALLOWED_ATTRIBUTES,
+    ALLOWED_CATEGORIES,
+    category_from_dataset,
+)
+
 ES_DIR = PROJECT_ROOT / 'data' / 'raw' / 'energystar'
 MANIFEST_PATH = ES_DIR / 'manifest.json'
 OUT_DIR = ES_DIR / 'normalized'
@@ -43,10 +54,6 @@ ATTRIBUTE_ALIASES = {
     'fuel': 'fuel',
     'heat pump type': 'heat_pump_type',
     'cold climate': 'cold_climate',
-    'annual energy use kwh yr': 'annual_energy_use_kwh',
-    'annual energy consumption kwh year': 'annual_energy_use_kwh',
-    'cooling capacity btu h': 'cooling_capacity_btu',
-    'cooling capacity btu hr': 'cooling_capacity_btu',
 }
 
 SKIP_ATTRIBUTES = {
@@ -90,34 +97,6 @@ def slug_attr(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '_', key).strip('_')
 
 
-def category_from_dataset(name: str) -> str:
-    text = name.lower()
-    text = re.sub(r'^energy star certified\s+', '', text)
-    text = re.sub(r'\s+v\d+(\.\d+)?$', '', text)
-    slug = re.sub(r'[^a-z0-9]+', '_', text).strip('_')
-
-    # Collapse ENERGY STAR dataset names onto the category ids used by rebates.
-    if 'water_heater' in slug:
-        return 'water_heater'
-    if 'geothermal_heat_pump' in slug:
-        return 'geothermal_heat_pump'
-    if 'heat_pump' in slug:
-        return 'heat_pump'
-    if 'electric_cooking' in slug:
-        return 'electric_cooking'
-    if 'room_air_conditioner' in slug:
-        return 'room_air_conditioner'
-    if 'residential_clothes_washer' in slug or slug == 'commercial_clothes_washers':
-        return 'clothes_washer'
-    if 'residential_dishwasher' in slug or 'commercial_dishwasher' in slug:
-        return 'dishwasher'
-    if 'residential_refrigerator' in slug:
-        return 'refrigerator'
-    if 'residential_freezer' in slug:
-        return 'freezer'
-    return slug
-
-
 def pick_column(fieldnames: list[str], *candidates: str) -> str | None:
     lower_map = {f.lower().strip(): f for f in fieldnames}
     for candidate in candidates:
@@ -134,16 +113,19 @@ def clean_value(value: str) -> str:
     return text.lower()
 
 
-def add_attr(bucket: list[dict], model_id: str, name: str, value: str, seen: set[tuple[str, str]]) -> None:
-    key = (name, value)
-    if not value or key in seen:
+def put_attr(attrs: dict, name: str, value: str) -> None:
+    if name not in ALLOWED_ATTRIBUTES or not value:
         return
-    seen.add(key)
-    bucket.append({
-        'model_id': model_id,
-        'attribute_name': name,
-        'attribute_value': value,
-    })
+    existing = attrs.get(name)
+    if existing is None:
+        attrs[name] = value
+        return
+    if isinstance(existing, list):
+        if value not in existing:
+            existing.append(value)
+        return
+    if existing != value:
+        attrs[name] = [existing, value]
 
 
 def load_manifest() -> list[dict]:
@@ -160,20 +142,23 @@ def load_manifest() -> list[dict]:
     return items
 
 
-def import_dataset(item: dict, appliances: list[dict], attributes: list[dict], seen_ids: set[str]) -> tuple[int, int]:
+def import_dataset(item: dict, appliances: list[dict], seen_ids: set[str]) -> tuple[int, int, bool]:
     path = PROJECT_ROOT / item['path'] if item.get('path') else ES_DIR / item['file']
     if not path.exists():
         print(f'  missing file: {path}')
-        return 0, 0
+        return 0, 0, False
 
     category = category_from_dataset(item['name'])
+    if category not in ALLOWED_CATEGORIES:
+        return 0, 0, False
+
     rows_in = 0
     rows_kept = 0
 
     with path.open('r', encoding='utf-8-sig', newline='') as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
-            return 0, 0
+            return 0, 0, True
 
         brand_col = pick_column(
             reader.fieldnames,
@@ -202,24 +187,18 @@ def import_dataset(item: dict, appliances: list[dict], attributes: list[dict], s
             if not es_id and not model_number:
                 continue
 
-            model_id = f'es-{es_id}' if es_id else re.sub(r'[^a-z0-9._+-]+', '_', f'{brand}_{model_number}'.strip('_'))
+            model_id = f'es-{es_id}' if es_id else re.sub(
+                r'[^a-z0-9._+-]+', '_', f'{brand}_{model_number}'.strip('_')
+            )
             if model_id in seen_ids:
                 continue
             seen_ids.add(model_id)
 
-            appliances.append({
-                'model_id': model_id,
-                'category': category,
-                'brand': brand or 'unknown',
-            })
-
-            row_attrs: list[dict] = []
-            seen_attr_keys: set[tuple[str, str]] = set()
-
-            add_attr(row_attrs, model_id, 'model_number', model_number, seen_attr_keys)
-            add_attr(row_attrs, model_id, 'model_name', model_name, seen_attr_keys)
-            add_attr(row_attrs, model_id, 'energystar_id', es_id, seen_attr_keys)
-            add_attr(row_attrs, model_id, 'energystar_dataset', category, seen_attr_keys)
+            attrs: dict = {}
+            put_attr(attrs, 'model_number', model_number)
+            put_attr(attrs, 'model_name', model_name)
+            put_attr(attrs, 'energystar_id', es_id)
+            put_attr(attrs, 'energystar_dataset', category)
 
             value_map: dict[str, str] = {}
             for col, raw in row.items():
@@ -231,34 +210,38 @@ def import_dataset(item: dict, appliances: list[dict], attributes: list[dict], s
                 value = clean_value(raw)
                 if not value:
                     continue
-                add_attr(row_attrs, model_id, attr_name, value, seen_attr_keys)
+                put_attr(attrs, attr_name, value)
                 value_map[attr_name] = value
 
                 if attr_name == 'vent':
                     for piece in re.split(r'[/|,;]+', value):
-                        piece = piece.strip()
-                        alias = VENT_ALIASES.get(piece)
+                        alias = VENT_ALIASES.get(piece.strip())
                         if alias:
-                            add_attr(row_attrs, model_id, 'vent', alias, seen_attr_keys)
+                            put_attr(attrs, 'vent', alias)
 
             if 'uef' in value_map:
-                add_attr(row_attrs, model_id, 'efficiency', value_map['uef'], seen_attr_keys)
+                put_attr(attrs, 'efficiency', value_map['uef'])
             elif 'seer2' in value_map:
-                add_attr(row_attrs, model_id, 'efficiency', value_map['seer2'], seen_attr_keys)
+                put_attr(attrs, 'efficiency', value_map['seer2'])
             elif 'ceer' in value_map:
-                add_attr(row_attrs, model_id, 'efficiency', value_map['ceer'], seen_attr_keys)
+                put_attr(attrs, 'efficiency', value_map['ceer'])
             elif 'imef' in value_map:
-                add_attr(row_attrs, model_id, 'efficiency', value_map['imef'], seen_attr_keys)
+                put_attr(attrs, 'efficiency', value_map['imef'])
 
-            # Map cooking products that are induction into a category-friendly tag.
             cooking_tech = value_map.get('cooking_top_technology', '')
             if 'induction' in cooking_tech:
-                add_attr(row_attrs, model_id, 'cooking_top_technology', 'induction', seen_attr_keys)
+                put_attr(attrs, 'cooking_top_technology', 'induction')
 
-            attributes.extend(row_attrs)
+            appliances.append({
+                'model_id': model_id,
+                'category': category,
+                'brand': brand or 'unknown',
+                'model_number': model_number,
+                'attrs_json': json.dumps(attrs, separators=(',', ':')),
+            })
             rows_kept += 1
 
-    return rows_in, rows_kept
+    return rows_in, rows_kept, True
 
 
 def main() -> None:
@@ -270,29 +253,35 @@ def main() -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     appliances: list[dict] = []
-    attributes: list[dict] = []
     seen_ids: set[str] = set()
 
-    print(f'Importing {len(manifest)} ENERGY STAR datasets…')
+    print(f'Importing ENERGY STAR datasets (allowed categories only)…')
+    skipped = 0
     for item in manifest:
-        rows_in, rows_kept = import_dataset(item, appliances, attributes, seen_ids)
+        rows_in, rows_kept, used = import_dataset(item, appliances, seen_ids)
+        if not used:
+            skipped += 1
+            print(f'  skip {item["name"]}')
+            continue
         print(f'  {item["name"]}: kept {rows_kept:,} / {rows_in:,}')
 
     appliances_path = OUT_DIR / 'appliances.csv'
-    attributes_path = OUT_DIR / 'appliance_attributes.csv'
-
     with appliances_path.open('w', encoding='utf-8', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=['model_id', 'category', 'brand'])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=['model_id', 'category', 'brand', 'model_number', 'attrs_json'],
+        )
         writer.writeheader()
         writer.writerows(appliances)
 
-    with attributes_path.open('w', encoding='utf-8', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=['model_id', 'attribute_name', 'attribute_value'])
-        writer.writeheader()
-        writer.writerows(attributes)
+    # Remove legacy flat attribute dump if present (can be hundreds of MB).
+    legacy_attrs = OUT_DIR / 'appliance_attributes.csv'
+    if legacy_attrs.exists():
+        legacy_attrs.unlink()
+        print(f'Removed legacy {legacy_attrs}')
 
-    print(f'\nWrote {len(appliances):,} appliances → {appliances_path}')
-    print(f'Wrote {len(attributes):,} attributes → {attributes_path}')
+    print(f'\nSkipped {skipped} non-rebate datasets')
+    print(f'Wrote {len(appliances):,} appliances → {appliances_path}')
 
 
 if __name__ == '__main__':
