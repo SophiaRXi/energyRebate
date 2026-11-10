@@ -15,6 +15,17 @@ const eligibilityRules = [
     ['not', ['missing_requirement', 'ModelID', 'ProgramID']],
     ['not', ['failed_requirement', 'ModelID', 'ProgramID']]
   ],
+  [
+    'rule',
+    ['eligible_rebate', 'ModelID', 'ProgramID', 'Amount'],
+    ['appliance', 'ModelID'],
+    ['appliance_type', 'ModelID', 'Category'],
+    ['rebate_program', 'ProgramID', 'ZipCode', 'Category', 'IncomeCap', 'Amount'],
+    ['rebate_no_income_cap', 'ProgramID'],
+    ['user_zip', 'ZipCode'],
+    ['not', ['missing_requirement', 'ModelID', 'ProgramID']],
+    ['not', ['failed_requirement', 'ModelID', 'ProgramID']]
+  ],
 
   // Reverse helper: which programs the household qualifies for before picking a model.
   [
@@ -24,6 +35,13 @@ const eligibilityRules = [
     ['user_zip', 'ZipCode'],
     ['user_income', 'Income'],
     ['less', 'Income', 'IncomeCap']
+  ],
+  [
+    'rule',
+    ['eligible_program', 'ProgramID', 'Category', 'Amount', 'IncomeCap'],
+    ['rebate_program', 'ProgramID', 'ZipCode', 'Category', 'IncomeCap', 'Amount'],
+    ['rebate_no_income_cap', 'ProgramID'],
+    ['user_zip', 'ZipCode']
   ],
 
   // Missing: program asks for an attribute the appliance does not have at all.

@@ -12,14 +12,14 @@ app.get('/', (req, res) => {
 });
 
 app.post('/api/evaluate', (req, res) => {
-  const { zipCode, income, modelId, overrides } = req.body;
+  const { zipCode, income, modelId, overrides, answers } = req.body;
 
   if (!zipCode || income === undefined || income === null || income === '' || !modelId) {
     return res.status(400).json({ error: 'Missing required fields: zipCode, income, modelId' });
   }
 
   try {
-    const result = evaluateRebates(zipCode, Number(income), modelId, overrides || {});
+    const result = evaluateRebates(zipCode, Number(income), modelId, overrides || {}, answers || {});
     res.json({
       eligible: result.matches.length > 0,
       ...result
@@ -30,16 +30,17 @@ app.post('/api/evaluate', (req, res) => {
 });
 
 app.post('/api/discover', (req, res) => {
-  const { zipCode, income, category, brand, limit } = req.body;
+  const { zipCode, income, category, brand, limit, answers } = req.body;
 
-  if (!zipCode || income === undefined || income === null || income === '') {
-    return res.status(400).json({ error: 'Missing required fields: zipCode, income' });
+  if (!zipCode) {
+    return res.status(400).json({ error: 'Missing required field: zipCode' });
   }
 
   try {
-    const result = discoverEligible(zipCode, Number(income), {
+    const result = discoverEligible(zipCode, income === undefined || income === null || income === '' ? null : Number(income), {
       category: category || null,
       brand: brand || null,
+      answers: answers || {},
       limit: limit || 25
     });
     res.json(result);
