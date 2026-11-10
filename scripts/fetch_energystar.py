@@ -8,6 +8,7 @@ disk stays small without paying for hosted storage.
 from __future__ import annotations
 
 import json
+import datetime as dt
 import re
 import ssl
 import sys
@@ -119,6 +120,12 @@ def main() -> None:
             size = download_csv(item['id'], dest, ctx)
             item['bytes'] = size
             item['path'] = str(dest.relative_to(PROJECT_ROOT))
+            item['fetched_at'] = (
+                dt.datetime.now(dt.timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace('+00:00', 'Z')
+            )
             manifest.append(item)
             print(f'  ok ({size:,} bytes)')
         except urllib.error.HTTPError as err:

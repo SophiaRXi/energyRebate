@@ -3,8 +3,10 @@
 Periodically enrich appliances with retail product names and store prices.
 
 Home Depot and Lowe's block direct scrapes (HTTP 403). This script uses Bing
-Shopping results, which still surface Home Depot / Lowe's offers with titles
-and prices that are good enough for non-realtime rebate browsing.
+Shopping only as a discovery source. It fails closed unless one result card
+contains the complete appliance model number, brand, price, and a direct link
+to the retailer's product page. This intentionally prefers missing prices to
+misattributed prices.
 
 Outputs:
   data/raw/retail_listings.csv
@@ -16,16 +18,18 @@ Optional:
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import csv
 import datetime as dt
 import html as html_lib
-import json
 import re
 import sqlite3
 import ssl
 import time
 import urllib.parse
 import urllib.request
+from html.parser import HTMLParser
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -37,6 +41,10 @@ OUT_CSV = RAW_DIR / 'retail_listings.csv'
 STORES = {
     'home_depot': re.compile(r'home\s*depot', re.I),
     'lowes': re.compile(r"lowe'?s", re.I),
+}
+STORE_HOSTS = {
+    'home_depot': ('homedepot.com',),
+    'lowes': ('lowes.com',),
 }
 
 USER_AGENT = (
@@ -61,9 +69,11 @@ def fetch(url: str) -> str:
 
 
 def parse_price(text: str) -> float | None:
-    cleaned = text.replace(',', '').replace('$', '').strip()
+    matches = re.findall(r'\$\s*(\d[\d,]*(?:\.\d{1,2})?)', text or '')
+    if len(matches) != 1:
+        return None
     try:
-        value = float(cleaned)
+        value = float(matches[0].replace(',', ''))
     except ValueError:
         return None
     if value < 5 or value > 50000:
@@ -71,123 +81,201 @@ def parse_price(text: str) -> float | None:
     return value
 
 
-def pretty_brand(brand: str) -> str:
-    raw = (brand or '').replace('_', ' ').strip()
-    specials = {
-        'ge': 'GE',
-        'lg': 'LG',
-        'aosmith': 'A. O. Smith',
-        'ao smith': 'A. O. Smith',
-        'rheem': 'Rheem',
-        'bosch': 'Bosch',
-        'carrier': 'Carrier',
-        'friedrich': 'Friedrich',
+class _HtmlNode:
+    def __init__(self, tag: str, attrs: dict[str, str], parent=None):
+        self.tag = tag
+        self.attrs = attrs
+        self.parent = parent
+        self.children: list[_HtmlNode] = []
+        self.text_parts: list[str] = []
+
+
+class _DomParser(HTMLParser):
+    VOID_TAGS = {
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr',
     }
-    return specials.get(raw.lower(), raw.title())
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _HtmlNode('document', {})
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        node = _HtmlNode(tag.lower(), dict(attrs), self.stack[-1])
+        self.stack[-1].children.append(node)
+        if tag.lower() not in self.VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in self.VOID_TAGS and len(self.stack) > 1:
+            self.stack.pop()
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        for index in range(len(self.stack) - 1, 0, -1):
+            if self.stack[index].tag == tag:
+                del self.stack[index:]
+                return
+
+    def handle_data(self, data):
+        self.stack[-1].text_parts.append(data)
 
 
-def pretty_name(value: str) -> str:
-    text = re.sub(r'[_-]+', ' ', value or '').strip()
-    if not text:
+def walk(node: _HtmlNode):
+    yield node
+    for child in node.children:
+        yield from walk(child)
+
+
+def node_text(node: _HtmlNode) -> str:
+    return ' '.join(part for child in walk(node) for part in child.text_parts).strip()
+
+
+def node_has_class(node: _HtmlNode, class_name: str) -> bool:
+    return class_name.lower() in (node.attrs.get('class') or '').lower().split()
+
+
+def normalize_identity(value: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '', (value or '').lower())
+
+
+def score_offer(title: str, model_number: str, brand: str) -> int:
+    model = normalize_identity(model_number)
+    title_key = normalize_identity(title)
+    brand_key = normalize_identity(brand)
+    if len(model) < 5 or not brand_key:
+        return 0
+    return 100 if model in title_key and brand_key in title_key else 0
+
+
+def store_for_url(url: str) -> str | None:
+    try:
+        parsed = urllib.parse.urlsplit(urllib.parse.urljoin('https://www.bing.com', url))
+    except ValueError:
+        return None
+    if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+        return None
+    host = parsed.hostname.lower().rstrip('.')
+    if len(parsed.path.strip('/')) < 3:
+        return None
+    for store, domains in STORE_HOSTS.items():
+        if any(host == domain or host.endswith('.' + domain) for domain in domains):
+            return store
+    return None
+
+
+def resolve_retailer_url(url: str) -> str:
+    """Unwrap Bing's common tracking links and return only an allowed store URL."""
+    absolute = urllib.parse.urljoin('https://www.bing.com', html_lib.unescape(url or '').strip())
+    if store_for_url(absolute):
+        return absolute
+
+    try:
+        parsed = urllib.parse.urlsplit(absolute)
+    except ValueError:
         return ''
-    parts = []
-    for word in text.split():
-        low = word.lower()
-        if low in {'ge', 'lg', 'btu', 'uef', 'hp', 'ids'}:
-            parts.append(low.upper())
-        elif low in {'a.', 'o.'}:
-            parts.append(low.upper())
-        else:
-            parts.append(word[:1].upper() + word[1:])
-    return ' '.join(parts)
+    host = (parsed.hostname or '').lower()
+    if host != 'bing.com' and not host.endswith('.bing.com'):
+        return ''
+
+    query = urllib.parse.parse_qs(parsed.query)
+    candidates = []
+    for key in ('u', 'url', 'target', 'r'):
+        for value in query.get(key, []):
+            value = urllib.parse.unquote(value)
+            candidates.append(value)
+            if value.startswith('a1'):
+                encoded = value[2:]
+                encoded += '=' * (-len(encoded) % 4)
+                try:
+                    candidates.append(base64.urlsafe_b64decode(encoded).decode('utf-8', 'replace'))
+                except (ValueError, binascii.Error):
+                    continue
+
+    for candidate in candidates:
+        candidate = urllib.parse.unquote(candidate)
+        if store_for_url(candidate):
+            return urllib.parse.urljoin('https://www.bing.com', candidate)
+    return ''
 
 
-def tokenize_model(model_number: str) -> list[str]:
-    raw = re.sub(r'[^a-zA-Z0-9]+', ' ', model_number or '').upper().split()
-    skip = {
-        'THE', 'AND', 'FOR', 'WITH', 'PROP', 'TYPE', 'MODEL', 'SERIES',
-        'RH', 'HE', 'EC', 'HP', 'WH', 'GAL'
-    }
-    return [t for t in raw if len(t) >= 4 and t not in skip]
-
-
-def score_offer(title: str, model_number: str, brand: str, model_name: str = '') -> int:
-    score = 0
-    title_u = title.upper()
-    brand_u = (brand or '').upper()
-    if brand_u and brand_u in title_u:
-        score += 3
-    elif brand_u.replace('.', '') and brand_u.replace('.', '') in title_u.replace('.', ''):
-        score += 2
-
-    model_tokens = tokenize_model(model_number)
-    if model_tokens:
-        hits = sum(1 for t in model_tokens if t in title_u)
-        score += hits * 3
-        if hits == len(model_tokens):
-            score += 6
-
-    name_tokens = [
-        t for t in re.sub(r'[^a-zA-Z0-9]+', ' ', model_name or '').upper().split()
-        if len(t) >= 4 and t not in {
-            'WITH', 'FROM', 'GALLON', 'WATER', 'HEATER', 'HEAT', 'PUMP',
-            'DIRECT', 'VENT', 'POWER', 'NATURAL', 'ELECTRIC', 'SMART',
-            'TALL', 'SHORT', 'HYBRID', 'HIGH', 'EFFICIENCY'
-        }
-    ]
-    if name_tokens:
-        name_hits = sum(1 for t in name_tokens if t in title_u)
-        score += name_hits
-        if name_hits >= max(1, len(name_tokens) // 2):
-            score += 2
-    return score
+def title_link(node: _HtmlNode) -> str:
+    current = node
+    for _ in range(8):
+        if current is None:
+            break
+        if current.tag == 'a' and current.attrs.get('href'):
+            return html_lib.unescape(current.attrs['href']).strip()
+        current = current.parent
+    for child in walk(node):
+        if child.tag == 'a' and child.attrs.get('href'):
+            return html_lib.unescape(child.attrs['href']).strip()
+    return ''
 
 
 def parse_bing_shop(html: str) -> list[dict]:
+    """Read each title and price from their smallest shared result-card ancestor."""
+    parser = _DomParser()
+    parser.feed(html)
     offers = []
-    # Each offer card tends to include title, price, then seller nearby.
-    pattern = re.compile(
-        r'<div class="br-offTtl[^"]*"[^>]*>.*?<span title="([^"]+)".*?'
-        r'<div class="br-price">([^<]+)</div>.*?'
-        r'(?:<span class="br-offSlrTxt">([^<]+)</span>|<span class="br-liaIc">)',
-        re.S | re.I,
-    )
-    for match in pattern.finditer(html):
-        title = html_lib.unescape(match.group(1)).strip()
-        price = parse_price(html_lib.unescape(match.group(2)))
-        seller_raw = (match.group(3) or '').strip()
-        if price is None or not title:
+
+    for title_node in (n for n in walk(parser.root) if node_has_class(n, 'br-offTtl')):
+        title = next(
+            (html_lib.unescape(n.attrs['title']).strip() for n in walk(title_node)
+             if n.attrs.get('title', '').strip()),
+            node_text(title_node),
+        )
+        if not title:
             continue
-        store = None
-        for key, rx in STORES.items():
-            if rx.search(seller_raw) or rx.search(title):
-                store = key
+
+        url = resolve_retailer_url(title_link(title_node))
+        store = store_for_url(url)
+        if not store:
+            continue
+
+        current = title_node
+        for _ in range(10):
+            if current is None:
                 break
-        if not store:
-            # Local inventory icon cards are often Home Depot without text seller.
-            if 'br-liaIc' in match.group(0) and not seller_raw:
-                store = 'home_depot'
-        if not store:
-            continue
-        offers.append({
-            'store': store,
-            'product_name': title,
-            'price': price,
-            'seller': seller_raw or store,
-        })
+            descendants = list(walk(current))
+            price_node = next((n for n in descendants if node_has_class(n, 'br-price')), None)
+            if price_node:
+                price = parse_price(node_text(price_node))
+                if price is not None:
+                    seller_node = next(
+                        (n for n in descendants if node_has_class(n, 'br-offSlrTxt')),
+                        None,
+                    )
+                    seller = node_text(seller_node) if seller_node else store
+                    seller_store = next(
+                        (key for key, pattern in STORES.items() if pattern.search(seller)),
+                        None,
+                    )
+                    if seller_store and seller_store != store:
+                        break
+                    offers.append({
+                        'store': store,
+                        'product_name': title,
+                        'price': price,
+                        'seller': seller,
+                        'url': urllib.parse.urljoin('https://www.bing.com', url),
+                    })
+                    break
+            current = current.parent
+
     return offers
 
 
-def search_retail(brand: str, model_number: str, category: str, model_name: str = '') -> list[dict]:
-    queries = []
-    if brand and model_number:
-        queries.append(f'{brand} {model_number}')
-        queries.append(f'{model_number} Home Depot')
-        queries.append(f'{model_number} Lowe\'s')
-    if brand and model_name:
-        queries.append(f'{brand} {model_name}')
-    if not queries:
-        queries.append(' '.join(p for p in [brand, model_number, category.replace('_', ' ')] if p))
+def search_retail(brand: str, model_number: str) -> list[dict]:
+    if not brand or not model_number:
+        return []
+    queries = [
+        f'{brand} {model_number}',
+        f'{model_number} Home Depot',
+        f'{model_number} Lowe\'s',
+    ]
 
     offers = []
     seen_queries = set()
@@ -207,10 +295,9 @@ def search_retail(brand: str, model_number: str, category: str, model_name: str 
     # Keep the best-scoring offer per store.
     best: dict[str, dict] = {}
     for offer in offers:
-        offer['score'] = score_offer(offer['product_name'], model_number, brand, model_name)
-        offer['token_hits'] = sum(
-            1 for t in tokenize_model(model_number) if t in offer['product_name'].upper()
-        )
+        offer['score'] = score_offer(offer['product_name'], model_number, brand)
+        if offer['score'] < 100 or not store_for_url(offer.get('url', '')):
+            continue
         prev = best.get(offer['store'])
         if prev is None or offer['score'] > prev['score'] or (
             offer['score'] == prev['score'] and offer['price'] < prev['price']
@@ -236,7 +323,7 @@ def load_targets(conn: sqlite3.Connection, limit: int, seed_only: bool) -> list[
         placeholders = ','.join('?' for _ in seeds)
         rows = cur.execute(
             f"""
-            SELECT a.model_id, a.brand, a.category, a.model_number, a.attrs_json
+            SELECT a.model_id, a.brand, a.model_number
             FROM appliances a
             WHERE a.model_id IN ({placeholders})
             ORDER BY a.brand, a.model_id
@@ -246,7 +333,7 @@ def load_targets(conn: sqlite3.Connection, limit: int, seed_only: bool) -> list[
     else:
         rows = cur.execute(
             """
-            SELECT a.model_id, a.brand, a.category, a.model_number, a.attrs_json
+            SELECT a.model_id, a.brand, a.model_number
             FROM appliances a
             WHERE a.category IN ('water_heater','heat_pump','induction_stove','electric_cooking')
             ORDER BY CASE WHEN a.model_id LIKE 'es-%' THEN 1 ELSE 0 END, a.brand, a.model_id
@@ -257,22 +344,10 @@ def load_targets(conn: sqlite3.Connection, limit: int, seed_only: bool) -> list[
 
     targets = []
     for r in rows:
-        model_name = ''
-        try:
-            attrs = json.loads(r[4] or '{}')
-            raw_name = attrs.get('model_name')
-            if isinstance(raw_name, list):
-                model_name = str(raw_name[0]) if raw_name else ''
-            elif raw_name:
-                model_name = str(raw_name)
-        except Exception:
-            model_name = ''
         targets.append({
             'model_id': r[0],
             'brand': r[1] or '',
-            'category': r[2] or '',
-            'model_number': r[3] or '',
-            'model_name': model_name,
+            'model_number': r[2] or '',
         })
     return targets[:limit]
 
@@ -283,6 +358,19 @@ def read_existing_csv() -> dict[tuple[str, str], dict]:
         return existing
     with OUT_CSV.open('r', encoding='utf-8', newline='') as handle:
         for row in csv.DictReader(handle):
+            model = normalize_identity(row.get('model_number', ''))
+            title = normalize_identity(row.get('product_name', ''))
+            store = row.get('store', '')
+            if (
+                store not in STORE_HOSTS
+                or not model
+                or model not in title
+                or row.get('match_score') != '100'
+                or store_for_url(row.get('url', '')) != store
+                or parse_price(row.get('price', '')) is None
+                or not row.get('fetched_at')
+            ):
+                continue
             existing[(row['model_id'], row['store'])] = row
     return existing
 
@@ -322,6 +410,9 @@ def ensure_retail_table(conn: sqlite3.Connection) -> None:
 def apply_to_db(rows: list[dict]) -> None:
     conn = sqlite3.connect(DB_PATH)
     ensure_retail_table(conn)
+    # The CSV is the reviewed source of truth; remove rows that did not survive
+    # validation before applying it to the local database.
+    conn.execute('DELETE FROM retail_listings')
     conn.executemany(
         '''
         INSERT INTO retail_listings (
@@ -350,7 +441,6 @@ def main() -> None:
     parser.add_argument('--seed-only', action='store_true', help='Only enrich non-ENERGY-STAR seed models')
     parser.add_argument('--apply-db', action='store_true', help='Upsert results into rebates.db')
     parser.add_argument('--sleep', type=float, default=1.5, help='Delay between Bing requests')
-    parser.add_argument('--min-score', type=int, default=3, help='Minimum title match score to keep')
     args = parser.parse_args()
 
     if not DB_PATH.exists():
@@ -364,9 +454,9 @@ def main() -> None:
     print(f'Enriching {len(targets)} appliances via Bing Shopping…')
 
     for i, target in enumerate(targets, start=1):
-        model_number = target['model_number'] or target['model_id']
+        model_number = target['model_number']
         brand = target['brand']
-        print(f'[{i}/{len(targets)}] {brand} {model_number}')
+        print(f'[{i}/{len(targets)}] {brand} {model_number or "(no verified model number)"}')
         # Replace prior rows for this model so stale/wrong prices don't linger.
         for key in list(existing):
             if key[0] == target['model_id']:
@@ -375,9 +465,7 @@ def main() -> None:
             offers = search_retail(
                 brand,
                 model_number,
-                target['category'],
-                target.get('model_name') or '',
-            )
+            ) if model_number else []
         except Exception as err:  # noqa: BLE001
             print(f'  failed: {err}')
             time.sleep(args.sleep)
@@ -385,22 +473,13 @@ def main() -> None:
 
         kept = 0
         now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-        tokens = tokenize_model(model_number)
         for offer in offers:
-            token_hits = offer.get('token_hits', 0)
-            title_u = offer['product_name'].upper()
-            brand_u = brand.upper()
-            has_brand = bool(brand_u) and (
-                brand_u in title_u or brand_u.replace('.', '') in title_u.replace('.', '')
-            )
-            # Prefer exact model-number hits. If absent, require brand in the title
-            # plus a solid similarity score so generic "40 gal water heater" cards drop out.
-            if token_hits == 0:
-                if not has_brand or offer['score'] < max(args.min_score + 1, 5):
-                    print(f'  skip unrelated {offer["store"]} score={offer["score"]} brand={has_brand} · {offer["product_name"][:60]}')
-                    continue
-            if offer['score'] < args.min_score:
-                print(f'  skip weak {offer["store"]} score={offer["score"]} · {offer["product_name"][:60]}')
+            if (
+                offer.get('score') != 100
+                or normalize_identity(model_number) not in normalize_identity(offer['product_name'])
+                or store_for_url(offer.get('url', '')) != offer.get('store')
+            ):
+                print(f'  skip unverified {offer["store"]} · {offer["product_name"][:60]}')
                 continue
             row = {
                 'model_id': target['model_id'],
@@ -408,41 +487,17 @@ def main() -> None:
                 'product_name': offer['product_name'],
                 'price': f'{offer["price"]:.2f}',
                 'currency': 'USD',
-                'url': '',
+                'url': offer['url'],
                 'model_number': model_number,
                 'fetched_at': now,
-                'match_score': str(offer['score']),
+                'match_score': '100',
             }
             existing[(row['model_id'], row['store'])] = row
             kept += 1
             print(f'  {offer["store"]}: ${offer["price"]:.2f} · {offer["product_name"][:70]}')
 
-        # Always keep a friendly catalog title for UI display.
-        model_name = pretty_name(target['model_name'] or '')
-        brand_nice = pretty_brand(brand)
-        if model_name and brand_nice and brand_nice.lower() in model_name.lower():
-            fallback_name = model_name
-        elif model_name:
-            fallback_name = f'{brand_nice} {model_name}'.strip()
-        else:
-            fallback_name = brand_nice or model_number or target['model_id']
-        fallback_name = re.sub(r'\s+', ' ', fallback_name).strip()
-        catalog_row = {
-            'model_id': target['model_id'],
-            'store': 'catalog',
-            'product_name': fallback_name,
-            'price': '',
-            'currency': 'USD',
-            'url': '',
-            'model_number': model_number,
-            'fetched_at': now,
-            'match_score': '0',
-        }
-        existing[(catalog_row['model_id'], catalog_row['store'])] = catalog_row
         if kept == 0:
-            print(f'  catalog title only: {fallback_name}')
-        else:
-            print(f'  catalog title: {fallback_name}')
+            print('  no verified retailer offer; product identity remains in the appliance catalog')
 
         time.sleep(args.sleep)
 

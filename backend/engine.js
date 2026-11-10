@@ -16,6 +16,7 @@ function summarizeAppliance(modelId, fallback = {}) {
     model_number: null,
     model_name: null,
     display_name: fallback.brand ? `${fallback.brand} ${modelId}` : modelId,
+    sources: [],
     prices: [],
     highlights: {}
   };
@@ -89,6 +90,9 @@ function pushRebateFacts(facts, programs, requirements) {
       atom(r.income_cap),
       atom(r.amount)
     ]);
+    if (r.income_cap === null || r.income_cap === undefined || r.income_cap === '') {
+      facts.push(['rebate_no_income_cap', atom(r.program_id)]);
+    }
   }
 
   for (const req of requirements || []) {
@@ -144,10 +148,10 @@ function buildForwardFacts(candidates, zipCode, income, modelId, attributes) {
 }
 
 function buildDiscoveryFacts(zipCode, income, discovery) {
-  const facts = [
-    ['user_zip', atom(zipCode)],
-    ['user_income', atom(income)]
-  ];
+  const facts = [['user_zip', atom(zipCode)]];
+  if (income !== null && income !== undefined && income !== '' && Number.isFinite(Number(income))) {
+    facts.push(['user_income', atom(income)]);
+  }
 
   pushRebateFacts(facts, discovery.programs, discovery.requirements);
 
@@ -176,7 +180,7 @@ function explainProgram(program, income, attributes, requirements) {
   const incomeNum = Number(income);
   const cap = Number(program.income_cap);
 
-  if (!(incomeNum < cap)) {
+  if (Number.isFinite(cap) && cap > 0 && !(incomeNum < cap)) {
     reasons.push(`Income $${incomeNum} is not below the program cap of $${cap}`);
   }
 
@@ -217,17 +221,140 @@ function explainProgram(program, income, attributes, requirements) {
   return {
     program_id: program.program_id,
     amount: Number(program.amount),
-    income_cap: cap,
+    income_cap: Number.isFinite(cap) && cap > 0 ? cap : null,
+    benefit_type: program.benefit_type || 'cash_rebate',
+    benefit: parseJson(program.benefit_json),
+    program_name: program.program_name || program.program_id,
+    provider: program.provider || null,
+    eligibility: parseJson(program.eligibility_json),
+    valid_from: program.valid_from || null,
+    valid_to: program.valid_to || null,
+    source_url: program.source_url || null,
+    verified_at: program.verified_at || null,
     status,
     reasons,
     missingAttributes: [...new Set(missingAttributes)]
   };
 }
 
+function parseJson(value) {
+  if (!value) return {};
+  try { return JSON.parse(value); } catch { return {}; }
+}
+
+function evaluateCondition(condition, context) {
+  const key = String(condition.field || '').toLowerCase();
+  const actual = context[key];
+  const op = String(condition.operator || 'eq').toLowerCase();
+  if (actual === undefined || actual === null || actual === '') return 'missing';
+  const expected = condition.value;
+  const aNum = Number(actual);
+  const eNum = Number(expected);
+  const dateCompare = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(expected))) return null;
+    const left = Date.parse(actual);
+    const right = Date.parse(expected);
+    return Number.isFinite(left) && Number.isFinite(right) ? [left, right] : null;
+  };
+  switch (op) {
+    case 'eq': return String(actual).toLowerCase() === String(expected).toLowerCase() ? 'pass' : 'fail';
+    case 'neq': return String(actual).toLowerCase() !== String(expected).toLowerCase() ? 'pass' : 'fail';
+    case 'in': return (Array.isArray(expected) ? expected : [expected]).some(v => String(v).toLowerCase() === String(actual).toLowerCase()) ? 'pass' : 'fail';
+    case 'not_in': return (Array.isArray(expected) ? expected : [expected]).some(v => String(v).toLowerCase() === String(actual).toLowerCase()) ? 'fail' : 'pass';
+    case 'gte': { const d = dateCompare(); return d ? (d[0] >= d[1] ? 'pass' : 'fail') : Number.isFinite(aNum) && Number.isFinite(eNum) ? (aNum >= eNum ? 'pass' : 'fail') : 'fail'; }
+    case 'gt': { const d = dateCompare(); return d ? (d[0] > d[1] ? 'pass' : 'fail') : Number.isFinite(aNum) && Number.isFinite(eNum) ? (aNum > eNum ? 'pass' : 'fail') : 'fail'; }
+    case 'lte': { const d = dateCompare(); return d ? (d[0] <= d[1] ? 'pass' : 'fail') : Number.isFinite(aNum) && Number.isFinite(eNum) ? (aNum <= eNum ? 'pass' : 'fail') : 'fail'; }
+    case 'lt': { const d = dateCompare(); return d ? (d[0] < d[1] ? 'pass' : 'fail') : Number.isFinite(aNum) && Number.isFinite(eNum) ? (aNum < eNum ? 'pass' : 'fail') : 'fail'; }
+    case 'between': return Number.isFinite(aNum) && Array.isArray(expected) && aNum >= Number(expected[0]) && aNum <= Number(expected[1]) ? 'pass' : 'fail';
+    case 'exists': return actual !== undefined && actual !== null && actual !== '' ? 'pass' : 'missing';
+    case 'contains': return String(actual).toLowerCase().includes(String(expected).toLowerCase()) ? 'pass' : 'fail';
+    default: return 'unsupported';
+  }
+}
+
+function assessProgram(program, income, answers = {}) {
+  const benefit = parseJson(program.benefit_json);
+  const conditions = parseJson(program.eligibility_json);
+  const answersByKey = Object.fromEntries(Object.entries(answers || {}).map(([k, v]) => [String(k).toLowerCase(), v]));
+  const context = { ...answersByKey };
+  if (context.zip === undefined && context.zip_code !== undefined) context.zip = context.zip_code;
+  if (income !== null && income !== undefined && income !== '' && Number.isFinite(Number(income))) {
+    context.income = Number(income);
+  }
+  if (program.income_cap !== null && program.income_cap !== undefined && Number(program.income_cap) > 0) {
+    if (income !== null && income !== undefined && income !== '' && Number.isFinite(Number(income))) {
+      context.income = Number(income);
+    }
+  }
+  const entries = [
+    ...(Array.isArray(conditions.all) ? conditions.all : []),
+    ...(Array.isArray(conditions.any) ? conditions.any : [])
+  ];
+  const missing = [];
+  const failed = [];
+  for (const condition of entries) {
+    const result = evaluateCondition(condition, context);
+    const label = condition.question || condition.label || condition.field || 'eligibility detail';
+    if (result === 'missing') missing.push({
+      field: String(condition.field || '').toLowerCase(),
+      question: label,
+      type: condition.type || 'text',
+      options: Array.isArray(condition.options) ? condition.options : []
+    });
+    else if (result === 'fail') failed.push(label);
+    else if (result === 'unsupported') failed.push(`Unsupported eligibility rule: ${condition.operator}`);
+  }
+  const all = Array.isArray(conditions.all) ? conditions.all : [];
+  const any = Array.isArray(conditions.any) ? conditions.any : [];
+  const cap = Number(program.income_cap);
+  const hasIncomeCap = Number.isFinite(cap) && cap > 0;
+  const incomeAvailable = context.income !== undefined && context.income !== null;
+  const capFailed = hasIncomeCap && incomeAvailable && Number(context.income) >= cap;
+  const capMissing = hasIncomeCap && !incomeAvailable;
+  const allFailed = all.some(c => evaluateCondition(c, context) === 'fail');
+  const anyPassed = any.length === 0 || any.some(c => evaluateCondition(c, context) === 'pass');
+  const relevantMissing = [
+    ...all.filter(c => evaluateCondition(c, context) === 'missing'),
+    ...(any.length && !anyPassed ? any.filter(c => evaluateCondition(c, context) === 'missing') : []),
+    ...(capMissing ? [{ field: 'income', question: 'What is your annual household income before taxes?', type: 'number' }] : [])
+  ].map(c => ({
+    field: String(c.field || '').toLowerCase(),
+    question: c.question || c.label || c.field || 'eligibility detail',
+    type: c.type || 'text',
+    options: Array.isArray(c.options) ? c.options : []
+  }));
+  const relevantFailed = [
+    ...all.filter(c => evaluateCondition(c, context) === 'fail'),
+    ...(any.length && !anyPassed ? any.filter(c => evaluateCondition(c, context) === 'fail') : [])
+  ].map(c => c.question || c.label || c.field || 'eligibility detail');
+  const today = new Date().toISOString().slice(0, 10);
+  const notStarted = Boolean(program.valid_from && today < program.valid_from);
+  const expired = Boolean(program.valid_to && today > program.valid_to);
+  const status = allFailed || !anyPassed || capFailed || notStarted || expired
+    ? 'ineligible'
+    : relevantMissing.length ? 'needs_input' : 'eligible';
+  return {
+    status,
+    missing: [...new Map(relevantMissing.map(item => [item.field, item])).values()],
+    failed: [...new Set([
+      ...relevantFailed,
+      ...(capFailed ? [`Income must be below $${cap}`] : []),
+      ...(notStarted ? [`Program starts ${program.valid_from}`] : []),
+      ...(expired ? [`Program ended ${program.valid_to}`] : [])
+    ])],
+    benefit,
+    benefit_type: program.benefit_type || 'cash_rebate',
+    program_name: program.program_name || program.program_id,
+    provider: program.provider || null,
+    valid_from: program.valid_from || null,
+    valid_to: program.valid_to || null
+  };
+}
+
 /**
  * Forward mode: one appliance → which rebates apply.
  */
-function evaluateRebates(zipCode, income, modelId, overrides = {}) {
+function evaluateRebates(zipCode, income, modelId, overrides = {}, answers = {}) {
   const candidates = getCandidateFacts(modelId, zipCode);
   if (!candidates) {
     return {
@@ -275,10 +402,31 @@ function evaluateRebates(zipCode, income, modelId, overrides = {}) {
       reqsByProgram.get(atom(program.program_id)) || []
     );
 
-    if (matchSet.has(atom(program.program_id))) {
-      return { ...explained, status: 'eligible', reasons: [], missingAttributes: [] };
+    const assessment = assessProgram(program, income, { ...answers, zip: zipCode, zip_code: zipCode });
+    if (matchSet.has(atom(program.program_id)) && assessment.status === 'eligible') {
+      return {
+        ...explained,
+        ...assessment,
+        amount: program.amount === null ? null : Number(program.amount),
+        income_cap: program.income_cap === null ? null : Number(program.income_cap),
+        source_url: program.source_url || null,
+        verified_at: program.verified_at || null,
+        status: 'eligible',
+        reasons: [],
+        missingAttributes: []
+      };
     }
-    return explained;
+    return {
+      ...explained,
+      ...assessment,
+      amount: program.amount === null ? null : Number(program.amount),
+      income_cap: program.income_cap === null ? null : Number(program.income_cap),
+      source_url: program.source_url || null,
+      verified_at: program.verified_at || null,
+      status: assessment.status !== 'eligible' ? assessment.status : explained.status,
+      reasons: [...(explained.reasons || []), ...(assessment.failed || []), ...(assessment.missing || []).map(q => `Need to confirm: ${q.question}`)],
+      questions: assessment.missing
+    };
   });
 
   const matches = evaluations
@@ -296,6 +444,7 @@ function evaluateRebates(zipCode, income, modelId, overrides = {}) {
     evaluations,
     attributesUsed: attributes,
     missingAttributes,
+    programQuestions: [...new Map(evaluations.flatMap(e => e.questions || []).map(q => [q.field, q])).values()],
     overridesApplied: Object.keys(overrides || {}).filter(
       k => overrides[k] !== undefined && overrides[k] !== null && overrides[k] !== ''
     ),
@@ -337,6 +486,9 @@ function discoverProgramAppliances(zipCode, income, program, requirements, disco
  * so Epilog stays fast against the large ENERGY STAR catalog.
  */
 function discoverEligible(zipCode, income, options = {}) {
+  const effectiveIncome = income === null || income === undefined || income === ''
+    ? ((options.answers || {}).income ?? null)
+    : income;
   const discovery = getDiscoveryCandidates(zipCode, {
     category: options.category || null,
     brand: options.brand || null,
@@ -351,10 +503,10 @@ function discoverEligible(zipCode, income, options = {}) {
   }
 
   // Income/ZIP program eligibility with a tiny fact set (no appliances).
-  const programFacts = [
-    ['user_zip', atom(zipCode)],
-    ['user_income', atom(income)]
-  ];
+  const programFacts = [['user_zip', atom(zipCode)]];
+  if (effectiveIncome !== null && effectiveIncome !== undefined && effectiveIncome !== '' && Number.isFinite(Number(effectiveIncome))) {
+    programFacts.push(['user_income', atom(effectiveIncome)]);
+  }
   pushRebateFacts(programFacts, discovery.programs, []);
   indexfacts(programFacts);
 
@@ -379,7 +531,7 @@ function discoverEligible(zipCode, income, options = {}) {
       programId,
       discoverProgramAppliances(
         zipCode,
-        income,
+        effectiveIncome,
         program,
         reqsByProgram.get(programId) || [],
         discovery
@@ -395,7 +547,8 @@ function discoverEligible(zipCode, income, options = {}) {
 
   const programs = discovery.programs.map(program => {
     const programId = atom(program.program_id);
-    const incomeEligible = eligibleProgramIds.has(programId);
+    const assessment = assessProgram(program, effectiveIncome, { ...(options.answers || {}), zip: zipCode, zip_code: zipCode });
+    const incomeEligible = eligibleProgramIds.has(programId) && assessment.status === 'eligible';
     const matched = matchedByProgram.get(programId) || [];
     const appliances = matched.map(row => {
       const summary = summaryById.get(row.model_id) || {
@@ -417,17 +570,30 @@ function discoverEligible(zipCode, income, options = {}) {
     return {
       program_id: program.program_id,
       category: program.category,
-      amount: Number(program.amount),
-      income_cap: Number(program.income_cap),
-      status: incomeEligible ? 'eligible' : 'ineligible',
-      reasons: incomeEligible
-        ? []
-        : [`Income $${Number(income)} is not below the program cap of $${Number(program.income_cap)}`],
+      amount: program.amount === null ? null : Number(program.amount),
+      income_cap: program.income_cap === null ? null : Number(program.income_cap),
+      benefit_type: assessment.benefit_type,
+      benefit: assessment.benefit,
+      program_name: assessment.program_name,
+      provider: assessment.provider,
+      valid_from: assessment.valid_from,
+      valid_to: assessment.valid_to,
+      source_url: program.source_url || null,
+      verified_at: program.verified_at || null,
+      status: incomeEligible ? 'eligible' : assessment.status,
+      reasons: [
+        ...assessment.missing.map(question => `Need to confirm: ${question.question}`),
+        ...assessment.failed.map(reason => `Does not meet: ${reason}`),
+        ...(!eligibleProgramIds.has(programId) && assessment.status === 'eligible'
+          ? [`Income $${Number(effectiveIncome)} is not below the program cap of $${Number(program.income_cap)}`]
+          : [])
+      ],
       requirements: (reqsByProgram.get(programId) || []).map(r => ({
         attribute_name: r.attribute_name,
         operator: r.operator,
         attribute_value: r.attribute_value
       })),
+      questions: assessment.missing,
       appliances,
       appliance_count: appliances.length,
       candidate_pool_size: poolSize,
@@ -438,7 +604,7 @@ function discoverEligible(zipCode, income, options = {}) {
   return {
     mode: 'discover',
     zip_code: String(zipCode),
-    income: Number(income),
+    income: effectiveIncome === null ? null : Number(effectiveIncome),
     filters: {
       category: options.category || null,
       brand: options.brand || null,
@@ -446,6 +612,7 @@ function discoverEligible(zipCode, income, options = {}) {
     },
     programs,
     eligible_program_count: programs.filter(p => p.status === 'eligible').length,
+    needs_input_program_count: programs.filter(p => p.status === 'needs_input').length,
     eligible_appliance_count: allModelIds.length
   };
 }

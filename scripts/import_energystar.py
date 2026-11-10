@@ -12,6 +12,7 @@ local SQLite build stays small while remaining easy to move to a hosted DB later
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
 import re
 import sys
@@ -34,6 +35,8 @@ OUT_DIR = ES_DIR / 'normalized'
 ATTRIBUTE_ALIASES = {
     'uniform energy factor uef': 'uef',
     'uniform energy factor': 'uef',
+    'ahri reference number': 'ahri_reference_number',
+    'ahri certified reference number': 'ahri_reference_number',
     'seer2 btu wh': 'seer2',
     'seer2': 'seer2',
     'eer2 btu wh': 'eer2',
@@ -154,6 +157,12 @@ def import_dataset(item: dict, appliances: list[dict], seen_ids: set[str]) -> tu
 
     rows_in = 0
     rows_kept = 0
+    source_verified_at = item.get('fetched_at') or (
+        dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace('+00:00', 'Z')
+    )
 
     with path.open('r', encoding='utf-8-sig', newline='') as handle:
         reader = csv.DictReader(handle)
@@ -238,6 +247,11 @@ def import_dataset(item: dict, appliances: list[dict], seen_ids: set[str]) -> tu
                 'brand': brand or 'unknown',
                 'model_number': model_number,
                 'attrs_json': json.dumps(attrs, separators=(',', ':')),
+                'source_name': 'ENERGY STAR',
+                'source_url': item.get('permalink') or (
+                    f'https://data.energystar.gov/api/views/{item["id"]}/rows.csv?accessType=DOWNLOAD'
+                ),
+                'verified_at': source_verified_at,
             })
             rows_kept += 1
 
@@ -269,7 +283,10 @@ def main() -> None:
     with appliances_path.open('w', encoding='utf-8', newline='') as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=['model_id', 'category', 'brand', 'model_number', 'attrs_json'],
+            fieldnames=[
+                'model_id', 'category', 'brand', 'model_number', 'attrs_json',
+                'source_name', 'source_url', 'verified_at',
+            ],
         )
         writer.writeheader()
         writer.writerows(appliances)

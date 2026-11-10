@@ -8,6 +8,46 @@ const db = new Database(config.databasePath);
 const METRIC_COLUMNS = new Set([
   'uef', 'seer2', 'eer2', 'hspf2', 'ceer', 'imef', 'efficiency'
 ]);
+const PRICE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const PROGRAM_FIELDS = `program_id, zip_code, category, income_cap, amount, source_url, verified_at,
+  program_name, provider, benefit_type, benefit_json, geography_json, eligibility_json, valid_from, valid_to`;
+
+function normalizeIdentity(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function hasApprovedRetailUrl(store, value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return false;
+    const domains = {
+      home_depot: ['homedepot.com'],
+      lowes: ['lowes.com']
+    }[store] || [];
+    return url.pathname.replace(/\//g, '').length >= 3
+      && domains.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
+
+function isVerifiedCurrentPrice(row, brand, modelNumber) {
+  const checkedAt = Date.parse(row.fetched_at || '');
+  const age = Date.now() - checkedAt;
+  const model = normalizeIdentity(modelNumber);
+  const title = normalizeIdentity(row.product_name);
+  const brandKey = normalizeIdentity(brand);
+  return Number(row.price) >= 5
+    && Number(row.match_score) === 100
+    && model.length >= 5
+    && title.includes(model)
+    && brandKey.length > 0
+    && title.includes(brandKey)
+    && hasApprovedRetailUrl(row.store, row.url)
+    && Number.isFinite(checkedAt)
+    && age >= 0
+    && age <= PRICE_MAX_AGE_MS;
+}
 
 function expandAttrsJson(modelId, attrsJson, attributeNames = null) {
   let attrs;
@@ -71,9 +111,9 @@ function getCandidateFacts(modelId, zipCode) {
   const categoryAliases = categoryAliasesFor(appliance.category, attributes);
   const placeholders = categoryAliases.map(() => '?').join(', ');
   const candidateRebates = db.prepare(
-    `SELECT program_id, zip_code, category, income_cap, amount
+    `SELECT ${PROGRAM_FIELDS}
      FROM rebates
-     WHERE CAST(zip_code AS TEXT) = ? AND category IN (${placeholders})`
+     WHERE ? LIKE REPLACE(CAST(zip_code AS TEXT), '*', '%') AND category IN (${placeholders})`
   ).all(String(zipCode), ...categoryAliases);
 
   const requirements = getRequirementsForPrograms(candidateRebates.map(r => r.program_id));
@@ -93,7 +133,7 @@ function getRequirementsForPrograms(programIds) {
   if (!programIds || programIds.length === 0) return [];
   const placeholders = programIds.map(() => '?').join(', ');
   return db.prepare(
-    `SELECT program_id, attribute_name, operator, attribute_value
+    `SELECT program_id, scope, attribute_name, operator, attribute_value, condition_json
      FROM rebate_requirements
      WHERE program_id IN (${placeholders})`
   ).all(...programIds);
@@ -102,15 +142,15 @@ function getRequirementsForPrograms(programIds) {
 function getProgramsForZip(zipCode, category = null) {
   if (category) {
     return db.prepare(
-      `SELECT program_id, zip_code, category, income_cap, amount
+      `SELECT ${PROGRAM_FIELDS}
        FROM rebates
-       WHERE CAST(zip_code AS TEXT) = ? AND LOWER(category) = LOWER(?)`
+       WHERE ? LIKE REPLACE(CAST(zip_code AS TEXT), '*', '%') AND LOWER(category) = LOWER(?)`
     ).all(String(zipCode), String(category));
   }
   return db.prepare(
-    `SELECT program_id, zip_code, category, income_cap, amount
+    `SELECT ${PROGRAM_FIELDS}
      FROM rebates
-     WHERE CAST(zip_code AS TEXT) = ?
+     WHERE ? LIKE REPLACE(CAST(zip_code AS TEXT), '*', '%')
      ORDER BY category, program_id`
   ).all(String(zipCode));
 }
@@ -330,7 +370,7 @@ function getApplianceSummaries(modelIds) {
   ).all(...modelIds);
 
   const highlightNames = [
-    'model_number', 'model_name',
+    'model_number', 'model_name', 'ahri_reference_number',
     'uef', 'seer2', 'efficiency', 'vent', 'storage_volume',
     'draw_pattern', 'fhr_rating', 'cooking_top_technology', 'imef', 'ceer'
   ];
@@ -348,9 +388,32 @@ function getApplianceSummaries(modelIds) {
     model_number: a.model_number || null,
     model_name: null,
     display_name: null,
+    sources: [],
     prices: [],
     highlights: {}
   }]));
+
+  let sourceRows = [];
+  try {
+    sourceRows = db.prepare(
+      `SELECT model_id, source_name, source_url, verified_at
+       FROM appliance_sources
+       WHERE model_id IN (${placeholders})
+       ORDER BY verified_at DESC`
+    ).all(...modelIds);
+  } catch (err) {
+    if (!String(err.message || '').includes('no such table')) throw err;
+  }
+  for (const source of sourceRows) {
+    const row = byModel.get(source.model_id);
+    if (row && /^https?:\/\//i.test(source.source_url || '')) {
+      row.sources.push({
+        source_name: source.source_name,
+        source_url: source.source_url,
+        verified_at: source.verified_at || null
+      });
+    }
+  }
 
   const highlightSet = new Set(highlightNames);
   const attrsByModel = new Map();
@@ -381,7 +444,7 @@ function getApplianceSummaries(modelIds) {
     const retailRows = retailByModel.get(modelId) || [];
     row.display_name = buildDisplayName(row, attrsByModel.get(modelId) || {}, retailRows);
     row.prices = retailRows
-      .filter(r => r.store !== 'catalog' && r.price !== null && r.price !== undefined)
+      .filter(r => isVerifiedCurrentPrice(r, row.brand, row.model_number))
       .map(r => ({
         store: r.store,
         store_label: r.store === 'home_depot' ? 'Home Depot' : (r.store === 'lowes' ? "Lowe's" : r.store),

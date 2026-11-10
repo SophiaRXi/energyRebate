@@ -27,6 +27,7 @@ ALLOWED_CATEGORIES = {
 ALLOWED_ATTRIBUTES = {
     'model_number',
     'model_name',
+    'ahri_reference_number',
     'energystar_id',
     'energystar_dataset',
     'uef',

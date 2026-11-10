@@ -8,11 +8,13 @@ file stays small. Swap DATABASE_PATH / DATABASE_URL later without changing rules
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
 import os
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -49,21 +51,43 @@ CREATE TABLE appliances (
 ''')
 
 cursor.execute('''
+CREATE TABLE appliance_sources (
+    model_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    verified_at TEXT,
+    PRIMARY KEY (model_id, source_url)
+)
+''')
+
+cursor.execute('''
 CREATE TABLE rebates (
     program_id TEXT PRIMARY KEY,
     zip_code TEXT,
     category TEXT,
     income_cap REAL,
-    amount REAL
+    amount REAL,
+    source_url TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    program_name TEXT,
+    provider TEXT,
+    benefit_type TEXT,
+    benefit_json TEXT NOT NULL DEFAULT '{}',
+    geography_json TEXT NOT NULL DEFAULT '{}',
+    eligibility_json TEXT NOT NULL DEFAULT '{}',
+    valid_from TEXT,
+    valid_to TEXT
 )
 ''')
 
 cursor.execute('''
 CREATE TABLE rebate_requirements (
     program_id TEXT,
+    scope TEXT NOT NULL DEFAULT 'appliance',
     attribute_name TEXT,
     operator TEXT,
-    attribute_value TEXT
+    attribute_value TEXT,
+    condition_json TEXT NOT NULL DEFAULT '{}'
 )
 ''')
 
@@ -142,7 +166,44 @@ def attrs_from_eav(rows: list[tuple[str, str]]) -> dict:
     return attrs
 
 
-def insert_appliance(model_id: str, category: str, brand: str, attrs: dict) -> None:
+def normalize_identity(value: str) -> str:
+    return ''.join(ch.lower() for ch in (value or '') if ch.isalnum())
+
+
+def valid_retailer_url(store: str, url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in {'http', 'https'} or not parsed.hostname or len(parsed.path.strip('/')) < 3:
+        return False
+    host = parsed.hostname.lower().rstrip('.')
+    domains = {
+        'home_depot': ('homedepot.com',),
+        'lowes': ('lowes.com',),
+    }.get(store, ())
+    return any(host == domain or host.endswith('.' + domain) for domain in domains)
+
+
+def valid_rebate_source(source_url: str, verified_at: str) -> bool:
+    try:
+        parsed = urlparse(source_url)
+        verified_date = dt.date.fromisoformat((verified_at or '')[:10])
+    except (ValueError, TypeError):
+        return False
+    age_days = (dt.date.today() - verified_date).days
+    return parsed.scheme == 'https' and bool(parsed.hostname) and 0 <= age_days <= 90
+
+
+def insert_appliance(
+    model_id: str,
+    category: str,
+    brand: str,
+    attrs: dict,
+    source_name: str = '',
+    source_url: str = '',
+    verified_at: str = '',
+) -> None:
     model_number = first_scalar(attrs.get('model_number'))
     energystar_id = first_scalar(attrs.get('energystar_id'))
     cooking = first_scalar(attrs.get('cooking_top_technology'))
@@ -166,6 +227,11 @@ def insert_appliance(model_id: str, category: str, brand: str, attrs: dict) -> N
             *metrics,
         ),
     )
+    if source_name and source_url:
+        cursor.execute(
+            'INSERT OR IGNORE INTO appliance_sources VALUES (?, ?, ?, ?)',
+            (model_id, source_name, source_url, verified_at or None),
+        )
 
 
 def load_seed_appliances(path: Path, attr_path: Path | None, seen: set[str]) -> int:
@@ -189,13 +255,14 @@ def load_seed_appliances(path: Path, attr_path: Path | None, seen: set[str]) -> 
                 continue
             seen.add(model_id)
             attrs = attrs_from_eav(attrs_by_model.get(model_id, []))
-            if 'model_number' not in attrs:
-                attrs['model_number'] = model_id
             insert_appliance(
                 model_id,
                 row['category'].strip().lower(),
                 row['brand'].strip(),
                 attrs,
+                row.get('source_name', '').strip(),
+                row.get('source_url', '').strip(),
+                row.get('verified_at', '').strip(),
             )
             count += 1
     return count
@@ -225,6 +292,9 @@ def load_es_appliances(path: Path, seen: set[str]) -> int:
                 row['category'].strip().lower(),
                 row['brand'].strip(),
                 attrs,
+                row.get('source_name', '').strip(),
+                row.get('source_url', '').strip(),
+                row.get('verified_at', '').strip(),
             )
             count += 1
     return count
@@ -245,30 +315,55 @@ es_count = load_es_appliances(ES_NORMALIZED / 'appliances.csv', seen_models)
 print(f'Loaded {es_count:,} ENERGY STAR appliances')
 
 rebates_file = RAW_DIR / 'rebates.csv'
+rebates_skipped = 0
 with rebates_file.open('r', encoding='utf-8', newline='') as handle:
     for row in csv.DictReader(handle):
+        source_url = (row.get('source_url') or '').strip()
+        verified_at = (row.get('verified_at') or '').strip()
+        if not valid_rebate_source(source_url, verified_at):
+            rebates_skipped += 1
+            continue
         cursor.execute(
-            'INSERT INTO rebates VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO rebates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 row['program_id'].strip().lower(),
                 str(row['zip_code']).strip(),
                 row['category'].strip().lower(),
-                float(row['income_cap']),
-                float(row['amount']),
+                float(row['income_cap']) if row.get('income_cap', '').strip() else None,
+                float(row['amount']) if row.get('amount', '').strip() else None,
+                source_url,
+                verified_at,
+                row.get('program_name', '').strip() or None,
+                row.get('provider', '').strip() or None,
+                row.get('benefit_type', '').strip() or None,
+                json.dumps(json.loads(row.get('benefit_json') or '{}'), separators=(',', ':')),
+                json.dumps(json.loads(row.get('geography_json') or '{}'), separators=(',', ':')),
+                json.dumps(json.loads(row.get('eligibility_json') or '{}'), separators=(',', ':')),
+                row.get('valid_from', '').strip() or None,
+                row.get('valid_to', '').strip() or None,
             ),
         )
+if rebates_skipped:
+    print(f'Skipped {rebates_skipped} rebate rows without a recent HTTPS source')
 
 req_file = RAW_DIR / 'rebate_requirements.csv'
 if req_file.exists():
     with req_file.open('r', encoding='utf-8', newline='') as handle:
         for row in csv.DictReader(handle):
+            program_id = row['program_id'].strip().lower()
+            if not cursor.execute(
+                'SELECT 1 FROM rebates WHERE program_id = ?', (program_id,)
+            ).fetchone():
+                continue
             cursor.execute(
-                'INSERT INTO rebate_requirements VALUES (?, ?, ?, ?)',
+                'INSERT INTO rebate_requirements VALUES (?, ?, ?, ?, ?, ?)',
                 (
-                    row['program_id'].strip().lower(),
+                    program_id,
+                    (row.get('scope') or 'appliance').strip().lower(),
                     row['attribute_name'].strip().lower(),
                     row['operator'].strip().lower(),
                     row['attribute_value'].strip().lower(),
+                    json.dumps(json.loads(row.get('condition_json') or '{}'), separators=(',', ':')),
                 ),
             )
 
@@ -282,18 +377,46 @@ if retail_file.exists():
                 continue
             price_raw = (row.get('price') or '').strip()
             price = float(price_raw) if price_raw else None
+            store = row['store'].strip().lower()
+            product_name = row.get('product_name', '').strip()
+            url = row.get('url', '').strip()
+            model_number = row.get('model_number', '').strip()
+            match_score = int(row.get('match_score') or 0)
+            fetched_at = row.get('fetched_at', '').strip()
+
+            if price is not None:
+                appliance = cursor.execute(
+                    'SELECT brand, model_number FROM appliances WHERE model_id = ?',
+                    (model_id,),
+                ).fetchone()
+                expected_model = appliance[1] if appliance else None
+                expected_brand = appliance[0] if appliance else None
+                if (
+                    store not in {'home_depot', 'lowes'}
+                    or not valid_retailer_url(store, url)
+                    or not expected_model
+                    or normalize_identity(model_number) != normalize_identity(expected_model)
+                    or normalize_identity(expected_model) not in normalize_identity(product_name)
+                    or normalize_identity(expected_brand or '') not in normalize_identity(product_name)
+                    or match_score != 100
+                    or not fetched_at
+                    or price < 5
+                    or price > 50000
+                ):
+                    print(f'  skipped unverified retail price for {model_id}')
+                    continue
             cursor.execute(
                 'INSERT OR REPLACE INTO retail_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (
                     model_id,
-                    row['store'].strip().lower(),
-                    row.get('product_name', '').strip(),
+                    store,
+                    product_name,
                     price,
                     (row.get('currency') or 'USD').strip(),
-                    row.get('url', '').strip(),
-                    row.get('model_number', '').strip(),
-                    row.get('fetched_at', '').strip(),
-                    int(row.get('match_score') or 0),
+                    url,
+                    model_number,
+                    fetched_at,
+                    match_score,
                 ),
             )
             retail_count += 1

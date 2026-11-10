@@ -1,8 +1,1 @@
-program_id,attribute_name,operator,attribute_value
-pg_94102_hp,seer2,gte,15.2
-pg_94102_ind,efficiency,gte,3.5
-pg_94102_wh,uef,gte,0.80
-pg_94102_wh_powervent,uef,gte,0.80
-pg_94102_wh_powervent,vent,eq,power
-pg_10001_hp,seer2,gte,15.2
-pg_94102_ind_premium,efficiency,gte,3.7
+program_id,scope,attribute_name,operator,attribute_value,condition_json

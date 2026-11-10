@@ -161,6 +161,12 @@
       font-size: 0.82rem;
       font-weight: 700;
     }
+    a.price-chip {
+      text-decoration: none;
+    }
+    a.price-chip:hover {
+      text-decoration: underline;
+    }
     .price-chip.missing {
       background: #f3f6f9;
       color: var(--muted);
@@ -181,8 +187,8 @@
   <main>
     <h1>Energy Rebate Checker</h1>
     <p class="lede">
-      Work forward from a specific appliance, or backward from your household to see which
-      rebates you qualify for and which models you can buy. Session answers are never saved
+      Check a specific appliance or find programs for your household. The checker separates
+      confirmed matches from programs that need more information. Session answers are never saved
       to the appliance database.
     </p>
 
@@ -198,12 +204,12 @@
           <input type="text" id="zipCode" value="94102" required />
         </div>
         <div>
-          <label for="income">Household income ($)</label>
-          <input type="number" id="income" value="75000" required />
+          <label for="income">Household income ($, if relevant)</label>
+          <input type="number" id="income" value="75000" min="0" />
         </div>
         <div id="model-field">
           <label for="modelId">Appliance model ID</label>
-          <input type="text" id="modelId" value="UnknownVent_WH40" />
+          <input type="text" id="modelId" value="HPTU-66N 130" />
         </div>
       </div>
 
@@ -215,6 +221,7 @@
             <option value="heat_pump">Heat pump</option>
             <option value="water_heater">Water heater</option>
             <option value="induction_stove">Induction stove</option>
+            <option value="clothes_dryer">Clothes dryer</option>
           </select>
         </div>
         <div>
@@ -224,7 +231,7 @@
       </div>
 
       <p class="hint" id="mode-hint">
-        Try seed ids like UnknownVent_WH40 or AHRI-101, or any ENERGY STAR model number.
+        Try a model number like GDE21DMKES or HPTU-66N 130, or an ENERGY STAR model number.
       </p>
       <div style="margin-top: 1rem;">
         <button type="submit" id="submit-btn">Check eligibility</button>
@@ -260,16 +267,18 @@
       const hint = document.getElementById('mode-hint');
       const submit = document.getElementById('submit-btn');
       const modelInput = document.getElementById('modelId');
+      const incomeInput = document.getElementById('income');
 
       applianceBtn.classList.toggle('active', mode === 'appliance');
       discoverBtn.classList.toggle('active', mode === 'discover');
       modelField.classList.toggle('hidden', mode !== 'appliance');
       discoverFields.classList.toggle('hidden', mode !== 'discover');
       modelInput.required = mode === 'appliance';
+      incomeInput.required = mode === 'appliance';
       submit.textContent = mode === 'appliance' ? 'Check eligibility' : 'Find rebates & appliances';
       hint.textContent = mode === 'appliance'
-        ? 'Try seed ids like UnknownVent_WH40 or AHRI-101, or any ENERGY STAR model number.'
-        : 'Enter ZIP and income to list income-eligible programs and sample qualifying appliances via Epilog.';
+        ? 'Try a model number like GDE21DMKES or HPTU-66N 130, or an ENERGY STAR model number.'
+        : 'Enter a ZIP code; add income if a program uses an income limit. You can answer program-specific questions after the search.';
       document.getElementById('missing-panel').style.display = 'none';
       document.getElementById('result').style.display = 'none';
     }
@@ -277,9 +286,10 @@
     function collectAppliancePayload() {
       return {
         zipCode: document.getElementById('zipCode').value.trim(),
-        income: Number(document.getElementById('income').value),
+        income: document.getElementById('income').value === '' ? null : Number(document.getElementById('income').value),
         modelId: document.getElementById('modelId').value.trim(),
-        overrides: { ...sessionOverrides }
+        overrides: { ...sessionOverrides },
+        answers: Object.fromEntries([...document.querySelectorAll('[data-program-answer]')].map(input => [input.dataset.programAnswer, input.value]).filter(([, value]) => value !== ''))
       };
     }
 
@@ -288,7 +298,8 @@
       const brand = document.getElementById('brand').value.trim();
       return {
         zipCode: document.getElementById('zipCode').value.trim(),
-        income: Number(document.getElementById('income').value),
+        income: document.getElementById('income').value === '' ? null : Number(document.getElementById('income').value),
+        answers: Object.fromEntries([...document.querySelectorAll('[data-program-answer]')].map(input => [input.dataset.programAnswer, input.value]).filter(([, value]) => value !== '')),
         category: category || null,
         brand: brand || null,
         limit: 25
@@ -355,7 +366,7 @@
         : '';
 
       const knownAttrs = (data.attributesUsed || [])
-        .map(a => `${a.attribute_name}=${a.attribute_value}`)
+        .map(a => `${a.attribute_name === 'ahri_reference_number' ? 'AHRI Reference #' : a.attribute_name}=${a.attribute_value}`)
         .join(', ') || 'none';
 
       const evaluations = (data.evaluations || []).map(e => {
@@ -364,12 +375,17 @@
         const details = reasonList || missingList
           ? `<ul>${missingList}${reasonList}</ul>`
           : `<ul><li>All known requirements are satisfied.</li></ul>`;
+        const programSource = e.source_url
+          ? `<p class="meta">Program source: <a href="${escapeHtml(e.source_url)}" target="_blank" rel="noopener noreferrer">official program details</a>${e.verified_at ? ` · checked ${displayDate(e.verified_at)}` : ''}</p>`
+          : '';
         return `<article class="program">
           <div class="status ${e.status}">${e.status.replace('_', ' ')}</div>
           <h3>${e.program_id} — $${e.amount}</h3>
+          ${programSource}
           ${details}
         </article>`;
       }).join('') || '<p>No rebate programs cover this ZIP and appliance category.</p>';
+      const programQuestions = renderProgramQuestions(data.programQuestions || []);
 
       const a = data.appliance || {};
       resDiv.innerHTML = `
@@ -380,10 +396,14 @@
           · Internal ID ${escapeHtml(a.model_id || '')}
           · Category: ${escapeHtml(a.category || '')}
         </p>
+        ${renderSourceNote(a.sources)}
         <p class="meta">Specs used: ${knownAttrs}.</p>
         ${overrideNote}
+        ${programQuestions}
         ${evaluations}
       `;
+      const answerButton = document.getElementById('check-program-answers');
+      if (answerButton) answerButton.addEventListener('click', () => document.getElementById('rebate-form').requestSubmit());
 
       renderMissingFields(data.missingAttributes || [], data.attributesUsed || []);
     }
@@ -396,13 +416,33 @@
         .replace(/"/g, '&quot;');
     }
 
+    function displayDate(value) {
+      const raw = String(value || '');
+      const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T12:00:00` : raw;
+      const date = new Date(normalized);
+      return Number.isNaN(date.getTime()) ? 'unknown date' : date.toLocaleDateString();
+    }
+
     function renderPriceRow(prices) {
       if (!prices || prices.length === 0) {
-        return `<div class="price-row"><span class="price-chip missing">Retail price not enriched yet</span></div>`;
+        return `<div class="price-row"><span class="price-chip missing">No verified current retail price</span></div>`;
       }
       return `<div class="price-row">${prices.map(p =>
-        `<span class="price-chip">${escapeHtml(p.store_label)} $${Number(p.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
+        `<a class="price-chip" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(p.product_name)}">${escapeHtml(p.store_label)} ${new Intl.NumberFormat(undefined, { style: 'currency', currency: p.currency || 'USD' }).format(Number(p.price))} · checked ${escapeHtml(displayDate(p.fetched_at))}</a>`
       ).join('')}</div>`;
+    }
+
+    function renderSourceNote(sources) {
+      if (!sources || sources.length === 0) {
+        return `<p class="meta">Product source not recorded.</p>`;
+      }
+      const links = sources.map(source => {
+        const checked = source.verified_at
+          ? ` · checked ${displayDate(source.verified_at)}`
+          : '';
+        return `<a href="${escapeHtml(source.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source_name)}</a>${checked}`;
+      }).join(' · ');
+      return `<p class="meta">Product data source: ${links}</p>`;
     }
 
     function renderApplianceCard(a) {
@@ -423,8 +463,9 @@
       renderMissingFields([], []);
 
       if (!data.programs || data.programs.length === 0) {
-        resDiv.innerHTML = `<h2 style="margin-top:0;">No local programs</h2>
-          <p>No rebate programs were found for ZIP ${data.zip_code}.</p>`;
+        resDiv.innerHTML = `<h2 style="margin-top:0;">No verified programs are loaded for this ZIP</h2>
+          <p>The current program database has no source-verified entries for ZIP ${data.zip_code}. This does not mean you are ineligible; it means this checker cannot confirm a match yet.</p>
+          <p>For San Francisco, check <a href="https://cleanpowersf.org/electrify-your-home" target="_blank" rel="noopener noreferrer">CleanPowerSF Electrify Your Home</a> for current bill credits, and <a href="https://incentives.switchison.org/" target="_blank" rel="noopener noreferrer">The Switch Is On incentive finder</a> for other programs. Program terms can depend on your utility, existing appliance, installation date, and approved equipment.</p>`;
         return;
       }
 
@@ -433,6 +474,9 @@
           .map(r => `<li>${r.attribute_name} ${r.operator} ${r.attribute_value}</li>`)
           .join('') || '<li>No attribute requirements</li>';
         const reasons = (p.reasons || []).map(r => `<li>${r}</li>`).join('');
+        const programSource = p.source_url
+          ? `<p class="meta">Program source: <a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">official program details</a>${p.verified_at ? ` · checked ${displayDate(p.verified_at)}` : ''}</p>`
+          : '';
         const appliances = (p.appliances || []).map(renderApplianceCard).join('')
           || '<p class="hint">No sample appliances matched in the current candidate pool.</p>';
 
@@ -440,26 +484,57 @@
           ? `<p class="hint">Showing ${p.appliance_count} sample qualifying appliances (pool capped at ${data.filters.limit}).</p>`
           : '';
 
+        const benefitLabel = p.benefit && p.benefit.label
+          ? p.benefit.label
+          : p.amount === null ? 'See program terms' : `${new Intl.NumberFormat(undefined, { style: 'currency', currency: (p.benefit && p.benefit.currency) || 'USD', maximumFractionDigits: 0 }).format(p.amount)}`;
+        const conditionalBenefits = p.benefit && Array.isArray(p.benefit.conditional_benefits)
+          ? `<p class="hint">${p.benefit.conditional_benefits.map(b => escapeHtml(b.label)).join(' · ')}</p>`
+          : '';
         return `<article class="program">
           <div class="status ${p.status}">${p.status}</div>
-          <h3>${p.program_id} — $${p.amount}</h3>
-          <p class="meta">Category: ${p.category}. Income cap: $${p.income_cap}.</p>
+          <h3>${escapeHtml(p.program_name || p.program_id)} — ${escapeHtml(benefitLabel)}</h3>
+          ${programSource}
+          <p class="meta">Provider: ${escapeHtml(p.provider || 'not listed')} · Category: ${escapeHtml(p.category)}${p.income_cap === null ? ' · No income cap listed' : ` · Income cap: $${Number(p.income_cap).toLocaleString()}`}${p.valid_to ? ` · Ends ${escapeHtml(displayDate(p.valid_to))}` : ''}</p>
+          ${conditionalBenefits}
           <ul>${reqs}${reasons}</ul>
-          ${p.status === 'eligible' ? `<h4 style="margin:0.8rem 0 0.3rem;">Appliances you can buy</h4>${appliances}${more}` : ''}
+          ${p.appliance_count ? `<h4 style="margin:0.8rem 0 0.3rem;">Potential matching products</h4>${appliances}${more}<p class="hint">Confirm product approval and installation requirements with the program before purchase.</p>` : ''}
         </article>`;
       }).join('');
+
+      const questions = [...new Map(data.programs.flatMap(p => p.questions || []).map(q => [q.field, q])).values()];
+      const questionFields = renderProgramQuestions(questions);
 
       resDiv.innerHTML = `
         <h2 style="margin-top:0;">Programs for ZIP ${data.zip_code}</h2>
         <p class="meta">
-          ${data.eligible_program_count} income-eligible program(s),
-          ${data.eligible_appliance_count} qualifying appliance(s) in the sample pools.
+          ${data.eligible_program_count} confirmed match(es), ${data.needs_input_program_count} program(s) need more details.
         </p>
+        ${questionFields}
         ${programs}
       `;
+      const answerButton = document.getElementById('check-program-answers');
+      if (answerButton) answerButton.addEventListener('click', () => document.getElementById('rebate-form').requestSubmit());
+    }
+
+    function renderProgramQuestions(questions) {
+      if (!questions || !questions.length) return '';
+      const fields = questions.map(q => {
+        const field = escapeHtml(q.field);
+        const label = escapeHtml(q.question || q.field);
+        if (q.options && q.options.length) {
+          return `<div><label for="program-${field}">${label}</label><select id="program-${field}" data-program-answer="${field}"><option value="">Select…</option>${q.options.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}</select></div>`;
+        }
+        const type = ['date', 'number'].includes(q.type) ? q.type : 'text';
+        return `<div><label for="program-${field}">${label}</label><input id="program-${field}" type="${type}" data-program-answer="${field}" /></div>`;
+      }).join('');
+      return `<section class="program"><h3>Program eligibility details</h3><p class="hint">Answer what you know, then search again. Programs can have different rules; unanswered details stay marked as needing input.</p><div class="grid two">${fields}</div><button type="button" id="check-program-answers" style="margin-top:1rem;">Re-check with these answers</button></section>`;
     }
 
     async function runQuery() {
+      if (window.location.protocol === 'file:') {
+        throw new Error('Start the app with `npm start`, then open http://localhost:3000. The API cannot be reached from a file:// page.');
+      }
+
       if (currentMode === 'appliance') {
         const payload = collectAppliancePayload();
         const res = await fetch('/api/evaluate', {

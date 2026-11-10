@@ -1,9 +1,6 @@
-model_id,category,brand
-AHRI-101,heat_pump,Bosch
-AHRI-102,induction_stove,LG
-Rheem_XE40H06TT45U0,water_heater,Rheem
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,water_heater,Friedrich
-GE_GDE21DMKES,induction_stove,GE
-Carrier_25VNA436A003,heat_pump,Carrier
-AOSmith_HPTU66N,water_heater,AOSmith
-UnknownVent_WH40,water_heater,Generic
+model_id,category,brand,source_name,source_url,verified_at
+rheem_xe50t10h45u0,water_heater,Rheem,ENERGY STAR,https://www.energystar.gov/productfinder/product/certified-heat-pump-water-heaters/details/2408592,2026-11-09
+rheem_prop_g40-50_rh_he_ec3,water_heater,Rheem,ENERGY STAR,https://www.energystar.gov/productfinder/product/certified-gas-water-heaters/details/2408646,2026-11-09
+ge_gde21dmkes,refrigerator,GE,GE Appliances Canada,https://geappliances.ca/en_CA/Refrigeration/Refrigerators/GE-20-9-cu-ft-Bottom-Freezer-Refrigerator-Slate-GDE21DMKES/p/GDE21DMKES,2026-11-09
+carrier_25vna436a003,heat_pump,Carrier,Carrier,https://www.carrier.com/residential/en/us/products/heat-pumps/25VNA4/,2026-11-09
+aosmith_hptu-66n-130,water_heater,A. O. Smith,A. O. Smith,https://www.hotwater.com/products/heat-pump-voltex-10-year/hptu-66n-130/100313009.html,2026-11-09

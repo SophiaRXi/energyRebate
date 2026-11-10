@@ -1,42 +1,42 @@
 model_id,attribute_name,attribute_value
-AHRI-101,model_number,AHRI-101
-AHRI-101,model_name,Bosch IDS 2.0 Heat Pump
-AHRI-101,seer2,16.5
-AHRI-101,efficiency,16.5
-AHRI-102,model_number,AHRI-102
-AHRI-102,model_name,LG Studio Induction Cooktop
-AHRI-102,efficiency,3.8
-Rheem_XE40H06TT45U0,model_number,XE50T10H45U0
-Rheem_XE40H06TT45U0,model_name,Performance Platinum Hybrid Water Heater
-Rheem_XE40H06TT45U0,uef,0.81
-Rheem_XE40H06TT45U0,storage_volume,36
-Rheem_XE40H06TT45U0,draw_pattern,low
-Rheem_XE40H06TT45U0,fhr_rating,50
-Rheem_XE40H06TT45U0,recovery_efficiency,98
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,model_number,PROP G40-50 RH HE EC3
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,model_name,Friedrich Power Direct Vent Water Heater
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,uef,0.97
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,storage_volume,40
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,draw_pattern,high
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,fhr_rating,88
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,recovery_efficiency,97
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,power
-FRIEDRICH_PROP_G40-50_RH_HE_EC3,vent,direct
-GE_GDE21DMKES,model_number,GDE21DMKES
-GE_GDE21DMKES,model_name,GE Profile Induction Range
-GE_GDE21DMKES,efficiency,3.6
-Carrier_25VNA436A003,model_number,25VNA436A003
-Carrier_25VNA436A003,model_name,Carrier Infinity Heat Pump
-Carrier_25VNA436A003,seer2,14.0
-Carrier_25VNA436A003,efficiency,14.0
-AOSmith_HPTU66N,model_number,HPTU-66N
-AOSmith_HPTU66N,model_name,A. O. Smith Voltex Hybrid Electric Water Heater
-AOSmith_HPTU66N,uef,0.92
-AOSmith_HPTU66N,storage_volume,66
-AOSmith_HPTU66N,draw_pattern,high
-AOSmith_HPTU66N,vent,power
-UnknownVent_WH40,model_number,WH40-UNKNOWN
-UnknownVent_WH40,model_name,Generic 40 Gallon Water Heater
-UnknownVent_WH40,uef,0.88
-UnknownVent_WH40,storage_volume,40
-UnknownVent_WH40,draw_pattern,medium
+rheem_xe50t10h45u0,model_number,XE50T10H45U0
+rheem_xe50t10h45u0,model_name,Performance Platinum 50-Gallon Hybrid Electric Heat Pump Water Heater
+rheem_xe50t10h45u0,energystar_id,2408592
+rheem_xe50t10h45u0,energystar_dataset,water_heater
+rheem_xe50t10h45u0,uef,3.88
+rheem_xe50t10h45u0,efficiency,3.88
+rheem_xe50t10h45u0,storage_volume,45
+rheem_xe50t10h45u0,draw_pattern,medium-usage
+rheem_xe50t10h45u0,fhr_rating,67
+rheem_xe50t10h45u0,recovery_efficiency,430
+rheem_xe50t10h45u0,heat_pump_type,240 volt integrated hpwh
+rheem_xe50t10h45u0,fuel,electric
+rheem_prop_g40-50_rh_he_ec3,model_number,PROP G40-50* RH HE EC3
+rheem_prop_g40-50_rh_he_ec3,model_name,Rheem High-Efficiency Power Direct Vent Gas Storage Water Heater
+rheem_prop_g40-50_rh_he_ec3,energystar_id,2408646
+rheem_prop_g40-50_rh_he_ec3,energystar_dataset,water_heater
+rheem_prop_g40-50_rh_he_ec3,uef,0.90
+rheem_prop_g40-50_rh_he_ec3,efficiency,0.90
+rheem_prop_g40-50_rh_he_ec3,storage_volume,40
+rheem_prop_g40-50_rh_he_ec3,draw_pattern,high-usage
+rheem_prop_g40-50_rh_he_ec3,fhr_rating,88
+rheem_prop_g40-50_rh_he_ec3,recovery_efficiency,97
+rheem_prop_g40-50_rh_he_ec3,vent,power
+rheem_prop_g40-50_rh_he_ec3,fuel,natural gas
+rheem_prop_g40-50_rh_he_ec3,fuel,propane
+ge_gde21dmkes,model_number,GDE21DMKES
+ge_gde21dmkes,model_name,20.9 cu. ft. Bottom Freezer Refrigerator
+carrier_25vna436a003,model_number,25VNA436A003
+carrier_25vna436a003,model_name,Infinity Variable-Speed Heat Pump (25VNA4 Series)
+aosmith_hptu-66n-130,model_number,HPTU-66N 130
+aosmith_hptu-66n-130,model_name,ProLine XE Voltex 66-Gallon Hybrid Electric Heat Pump Water Heater
+aosmith_hptu-66n-130,energystar_id,2408882
+aosmith_hptu-66n-130,energystar_dataset,water_heater
+aosmith_hptu-66n-130,uef,3.45
+aosmith_hptu-66n-130,efficiency,3.45
+aosmith_hptu-66n-130,storage_volume,67
+aosmith_hptu-66n-130,draw_pattern,high-usage
+aosmith_hptu-66n-130,fhr_rating,79
+aosmith_hptu-66n-130,recovery_efficiency,265
+aosmith_hptu-66n-130,heat_pump_type,240 volt integrated hpwh
+aosmith_hptu-66n-130,fuel,electric
