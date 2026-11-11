@@ -134,6 +134,31 @@
       padding-left: 1.1rem;
       color: var(--muted);
     }
+    button.program-card {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #fbfcfd;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      padding: 1rem;
+      margin: 0.75rem 0 0;
+      font-weight: 400;
+    }
+    button.program-card:hover {
+      background: #f0f7f4;
+      border-color: #b7e0cf;
+    }
+    button.program-card .open-hint {
+      display: block;
+      margin-top: 0.65rem;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .back-link {
+      margin-bottom: 1rem;
+    }
     .appliance-card {
       border: 1px solid var(--line);
       padding: 0.85rem 0.9rem;
@@ -195,7 +220,7 @@
     <form id="rebate-form">
       <div class="mode-toggle">
         <button type="button" id="mode-appliance" class="active">Check an appliance</button>
-        <button type="button" id="mode-discover">Find rebates &amp; appliances</button>
+        <button type="button" id="mode-discover">Find rebates</button>
       </div>
 
       <div class="grid three">
@@ -275,10 +300,10 @@
       discoverFields.classList.toggle('hidden', mode !== 'discover');
       modelInput.required = mode === 'appliance';
       incomeInput.required = mode === 'appliance';
-      submit.textContent = mode === 'appliance' ? 'Check eligibility' : 'Find rebates & appliances';
+      submit.textContent = mode === 'appliance' ? 'Check eligibility' : 'Find rebates';
       hint.textContent = mode === 'appliance'
         ? 'Try a model number like GDE21DMKES or HPTU-66N 130, or an ENERGY STAR model number.'
-        : 'Enter a ZIP code; add income if a program uses an income limit. You can answer program-specific questions after the search.';
+        : 'Enter a ZIP code to list local rebates. Click a rebate to see which appliances meet its equipment rules.';
       document.getElementById('missing-panel').style.display = 'none';
       document.getElementById('result').style.display = 'none';
     }
@@ -457,10 +482,30 @@
       </div>`;
     }
 
+    function benefitLabelFor(p) {
+      if (p.benefit && p.benefit.label) return p.benefit.label;
+      if (p.amount === null || p.amount === undefined) return 'See program terms';
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: (p.benefit && p.benefit.currency) || 'USD',
+        maximumFractionDigits: 0
+      }).format(p.amount);
+    }
+
+    function renderEquipmentRules(p) {
+      const rules = (p.equipment_rules && p.equipment_rules.length)
+        ? p.equipment_rules
+        : (p.requirements || []).map(r => r.label || `${r.attribute_name} ${r.operator} ${r.attribute_value}`);
+      if (!rules.length) return '';
+      return `<p class="meta" style="margin-bottom:0.25rem;"><strong>New appliance must meet:</strong></p>
+        <ul>${rules.map(rule => `<li>${escapeHtml(rule)}</li>`).join('')}</ul>`;
+    }
+
     function renderDiscoverResult(data) {
       const resDiv = document.getElementById('result');
       resDiv.style.display = 'block';
       renderMissingFields([], []);
+      window.__lastDiscover = data;
 
       if (!data.programs || data.programs.length === 0) {
         resDiv.innerHTML = `<h2 style="margin-top:0;">No verified programs are loaded for this ZIP</h2>
@@ -470,50 +515,89 @@
       }
 
       const programs = data.programs.map(p => {
-        const reqs = (p.requirements || [])
-          .map(r => `<li>${r.attribute_name} ${r.operator} ${r.attribute_value}</li>`)
-          .join('') || '<li>No attribute requirements</li>';
-        const reasons = (p.reasons || []).map(r => `<li>${r}</li>`).join('');
+        const reasons = (p.reasons || []).map(r => `<li>${escapeHtml(r)}</li>`).join('');
         const programSource = p.source_url
-          ? `<p class="meta">Program source: <a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">official program details</a>${p.verified_at ? ` · checked ${displayDate(p.verified_at)}` : ''}</p>`
+          ? `<p class="meta">Program source: <a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">official program details</a>${p.verified_at ? ` · checked ${displayDate(p.verified_at)}` : ''}</p>`
           : '';
-        const appliances = (p.appliances || []).map(renderApplianceCard).join('')
-          || '<p class="hint">No sample appliances matched in the current candidate pool.</p>';
-
-        const more = p.more_appliances_available
-          ? `<p class="hint">Showing ${p.appliance_count} sample qualifying appliances (pool capped at ${data.filters.limit}).</p>`
-          : '';
-
-        const benefitLabel = p.benefit && p.benefit.label
-          ? p.benefit.label
-          : p.amount === null ? 'See program terms' : `${new Intl.NumberFormat(undefined, { style: 'currency', currency: (p.benefit && p.benefit.currency) || 'USD', maximumFractionDigits: 0 }).format(p.amount)}`;
         const conditionalBenefits = p.benefit && Array.isArray(p.benefit.conditional_benefits)
           ? `<p class="hint">${p.benefit.conditional_benefits.map(b => escapeHtml(b.label)).join(' · ')}</p>`
           : '';
-        return `<article class="program">
-          <div class="status ${p.status}">${p.status}</div>
-          <h3>${escapeHtml(p.program_name || p.program_id)} — ${escapeHtml(benefitLabel)}</h3>
+        return `<button type="button" class="program-card" data-program-id="${escapeHtml(p.program_id)}">
+          <div class="status ${p.status}">${p.status.replace('_', ' ')}</div>
+          <h3>${escapeHtml(p.program_name || p.program_id)} — ${escapeHtml(benefitLabelFor(p))}</h3>
           ${programSource}
           <p class="meta">Provider: ${escapeHtml(p.provider || 'not listed')} · Category: ${escapeHtml(p.category)}${p.income_cap === null ? ' · No income cap listed' : ` · Income cap: $${Number(p.income_cap).toLocaleString()}`}${p.valid_to ? ` · Ends ${escapeHtml(displayDate(p.valid_to))}` : ''}</p>
           ${conditionalBenefits}
-          <ul>${reqs}${reasons}</ul>
-          ${p.appliance_count ? `<h4 style="margin:0.8rem 0 0.3rem;">Potential matching products</h4>${appliances}${more}<p class="hint">Confirm product approval and installation requirements with the program before purchase.</p>` : ''}
-        </article>`;
+          ${renderEquipmentRules(p)}
+          ${reasons ? `<ul>${reasons}</ul>` : ''}
+          <span class="open-hint">View eligible appliances →</span>
+        </button>`;
       }).join('');
 
       const questions = [...new Map(data.programs.flatMap(p => p.questions || []).map(q => [q.field, q])).values()];
       const questionFields = renderProgramQuestions(questions);
 
       resDiv.innerHTML = `
-        <h2 style="margin-top:0;">Programs for ZIP ${data.zip_code}</h2>
+        <h2 style="margin-top:0;">Rebates for ZIP ${data.zip_code}</h2>
         <p class="meta">
-          ${data.eligible_program_count} confirmed match(es), ${data.needs_input_program_count} program(s) need more details.
+          ${data.programs.length} program(s) found.
+          ${data.needs_input_program_count ? `${data.needs_input_program_count} still need household details before they can be marked fully eligible.` : ''}
+          Click a rebate to check which appliances meet its equipment rules.
         </p>
         ${questionFields}
         ${programs}
       `;
       const answerButton = document.getElementById('check-program-answers');
       if (answerButton) answerButton.addEventListener('click', () => document.getElementById('rebate-form').requestSubmit());
+      resDiv.querySelectorAll('[data-program-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await openProgramAppliances(btn.getAttribute('data-program-id'));
+          } catch (err) {
+            console.error(err);
+            alert(err.message || 'Failed to load eligible appliances.');
+          }
+        });
+      });
+    }
+
+    async function openProgramAppliances(programId) {
+      const resDiv = document.getElementById('result');
+      resDiv.style.display = 'block';
+      resDiv.innerHTML = `<p class="meta">Loading eligible appliances…</p>`;
+
+      const payload = collectDiscoverPayload();
+      payload.programId = programId;
+      const res = await fetch('/api/discover/appliances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to load appliances');
+
+      const p = data.program || {};
+      const appliances = (data.appliances || []).map(renderApplianceCard).join('')
+        || '<p class="hint">No matching appliances found in the current catalog for these equipment rules. Confirm the program’s approved-product list before buying.</p>';
+      const more = data.more_appliances_available
+        ? `<p class="hint">Showing ${data.appliance_count} sample qualifying appliances (capped at ${data.filters.limit}).</p>`
+        : '';
+
+      resDiv.innerHTML = `
+        <div class="back-link"><button type="button" class="secondary" id="back-to-rebates">← Back to rebates</button></div>
+        <h2 style="margin-top:0;">${escapeHtml(p.program_name || programId)}</h2>
+        <p class="meta">${escapeHtml(benefitLabelFor(p))} · ${escapeHtml(p.provider || '')} · ${escapeHtml(p.category || '')}</p>
+        ${p.source_url ? `<p class="meta"><a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">Official program details</a></p>` : ''}
+        ${renderEquipmentRules(p)}
+        <h3 style="margin:1rem 0 0.35rem; font-size:1.05rem;">Eligible appliances to consider</h3>
+        <p class="hint">These models meet the program’s recorded equipment filters in this checker. Still confirm approval and installation rules with the provider before purchase.</p>
+        ${appliances}
+        ${more}
+      `;
+      document.getElementById('back-to-rebates').addEventListener('click', () => {
+        if (window.__lastDiscover) renderDiscoverResult(window.__lastDiscover);
+        else document.getElementById('rebate-form').requestSubmit();
+      });
     }
 
     function renderProgramQuestions(questions) {

@@ -1,1 +1,3 @@
 program_id,scope,attribute_name,operator,attribute_value,condition_json
+cleanpowersf_hpwh,appliance,uef,gte,3.3,"{""label"":""UEF at least 3.3 (ENERGY STAR heat pump water heater)""}"
+cleanpowersf_electric_cooking,appliance,cooking_top_technology,eq,induction,"{""label"":""Induction cooktop or range (ENERGY STAR electric cooking)""}"

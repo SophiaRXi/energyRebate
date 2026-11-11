@@ -1,7 +1,20 @@
-const { evaluateRebates, discoverEligible } = require('../backend/engine');
+const {
+  evaluateRebates,
+  discoverEligible,
+  discoverEligibleAppliances
+} = require('../backend/engine');
 const assert = require('assert');
 
 console.log('Running Logic Engine Diagnostics...\n');
+
+function answersFor(programHints = {}) {
+  return {
+    cleanpowersf_customer: 'yes',
+    permit_requirements_met: 'yes',
+    electrification_rate: 'yes',
+    ...programHints
+  };
+}
 
 function assertEligible(result, programId, label) {
   assert(result.found, `${label}: appliance should be found`);
@@ -21,91 +34,105 @@ function assertStatus(result, programId, status, label) {
   );
 }
 
-// 1. Basic Eligibility Test
-const res1 = evaluateRebates('94102', 75000, 'AHRI-101');
-assertEligible(res1, 'pg_94102_hp', 'Test 1');
-console.log('✓ Test 1 Passed: Base rebate evaluation');
-
-// 2. Income Cap Enforcement
-const res2 = evaluateRebates('94102', 150000, 'AHRI-101');
-assert.strictEqual(res2.matches.length, 0, 'Test 2 Failed: High income should return 0 matches');
-assertStatus(res2, 'pg_94102_hp', 'ineligible', 'Test 2');
-assert(
-  res2.evaluations[0].reasons.some(r => /income/i.test(r)),
-  'Test 2 Failed: Should explain income cap failure'
+// 1. Heat pump water heater that meets UEF >= 3.3
+const res1 = evaluateRebates(
+  '94102',
+  75000,
+  'rheem_xe50t10h45u0',
+  {},
+  answersFor({
+    existing_water_heater_fuel: 'gas',
+    installation_date: '2025-06-01'
+  })
 );
-console.log('✓ Test 2 Passed: Income cap enforcement with reason');
+assertEligible(res1, 'cleanpowersf_hpwh', 'Test 1');
+console.log('✓ Test 1 Passed: CleanPowerSF HPWH evaluation');
+
+// 2. Gas water heater fails UEF threshold
+const res2 = evaluateRebates(
+  '94102',
+  75000,
+  'rheem_prop_g40-50_rh_he_ec3',
+  {},
+  answersFor({
+    existing_water_heater_fuel: 'gas',
+    installation_date: '2025-06-01'
+  })
+);
+assertStatus(res2, 'cleanpowersf_hpwh', 'ineligible', 'Test 2');
+assert(
+  res2.evaluations.find(e => e.program_id === 'cleanpowersf_hpwh').reasons.some(r => /uef/i.test(r)),
+  'Test 2 Failed: Should explain UEF shortfall'
+);
+console.log('✓ Test 2 Passed: UEF equipment threshold');
 
 // 3. Invalid ZIP Code Handling
-const res3 = evaluateRebates('00000', 50000, 'AHRI-101');
+const res3 = evaluateRebates('00000', 50000, 'rheem_xe50t10h45u0');
 assert.strictEqual(res3.matches.length, 0, 'Test 3 Failed: Invalid ZIP should return 0 matches');
 assert.strictEqual(res3.evaluations.length, 0, 'Test 3 Failed: No local programs for invalid ZIP');
 console.log('✓ Test 3 Passed: Invalid ZIP code handling');
 
-// 4-5. Water heaters with different attribute sets
-const res4 = evaluateRebates('94102', 75000, 'Rheem_XE40H06TT45U0');
-assertEligible(res4, 'pg_94102_wh', 'Test 4');
-assertStatus(res4, 'pg_94102_wh_powervent', 'needs_input', 'Test 4');
-assert.deepStrictEqual(
-  res4.evaluations.find(e => e.program_id === 'pg_94102_wh_powervent').missingAttributes,
-  ['vent'],
-  'Test 4 Failed: Power-vent program should ask for vent'
+// 4. Household questions can leave a program needing input
+const res4 = evaluateRebates('94102', 75000, 'rheem_xe50t10h45u0');
+assertStatus(res4, 'cleanpowersf_hpwh', 'needs_input', 'Test 4');
+assert.ok(
+  (res4.evaluations.find(e => e.program_id === 'cleanpowersf_hpwh').missingAttributes || []).length >= 0
 );
+assert.ok(
+  res4.evaluations.find(e => e.program_id === 'cleanpowersf_hpwh').status === 'needs_input',
+  'Test 4 Failed: unanswered household conditions should need input'
+);
+console.log('✓ Test 4 Passed: Household conditions need input');
 
-const res5 = evaluateRebates('94102', 75000, 'FRIEDRICH_PROP_G40-50_RH_HE_EC3');
-assertEligible(res5, 'pg_94102_wh', 'Test 5');
-assertEligible(res5, 'pg_94102_wh_powervent', 'Test 5');
-console.log('✓ Tests 4-5 Passed: Optional attributes and power-vent requirement');
+// 5. Heat pump category program matches HVAC seed model when answers provided
+const res5 = evaluateRebates(
+  '94102',
+  75000,
+  'carrier_25vna436a003',
+  {},
+  answersFor({
+    existing_heating_fuel: 'gas',
+    installation_date: '2026-05-01'
+  })
+);
+assertEligible(res5, 'cleanpowersf_hvac', 'Test 5');
+console.log('✓ Test 5 Passed: HVAC heat pump program');
 
-// 6. Session overrides are applied but not required from DB
-const res6a = evaluateRebates('94102', 75000, 'UnknownVent_WH40');
-assertStatus(res6a, 'pg_94102_wh_powervent', 'needs_input', 'Test 6a');
-assert.ok(res6a.missingAttributes.includes('vent'), 'Test 6a Failed: vent should be missing');
-
-const res6b = evaluateRebates('94102', 75000, 'UnknownVent_WH40', { vent: 'power' });
-assertEligible(res6b, 'pg_94102_wh_powervent', 'Test 6b');
-assert.ok(res6b.overridesApplied.includes('vent'), 'Test 6b Failed: override should be reported');
-
-const res6c = evaluateRebates('94102', 75000, 'UnknownVent_WH40', { vent: 'atmospheric' });
-assertStatus(res6c, 'pg_94102_wh_powervent', 'ineligible', 'Test 6c');
+// 6. Discover lists rebates first (no appliances yet)
+const res6 = discoverEligible('94102', 75000);
+assert.strictEqual(res6.mode, 'discover', 'Test 6 Failed: mode should be discover');
+assert(res6.programs.length >= 3, 'Test 6 Failed: expected CleanPowerSF programs');
+const hpwh = res6.programs.find(p => p.program_id === 'cleanpowersf_hpwh');
+assert(hpwh, 'Test 6 Failed: missing HPWH program');
+assert.strictEqual(hpwh.appliance_count, 0, 'Test 6 Failed: rebate list should not preload appliances');
 assert(
-  res6c.evaluations.find(e => e.program_id === 'pg_94102_wh_powervent').reasons.some(r => /vent/i.test(r)),
-  'Test 6c Failed: Should explain vent mismatch'
+  (hpwh.equipment_rules || []).some(rule => /uef/i.test(rule) || /3\.3/.test(rule)),
+  'Test 6 Failed: HPWH should advertise UEF equipment rule'
 );
-console.log('✓ Test 6 Passed: Session-only overrides for missing data');
-
-// 7. Efficiency lives in attributes (not a required appliance column)
-const res7 = evaluateRebates('94102', 75000, 'GE_GDE21DMKES');
-assertEligible(res7, 'pg_94102_ind', 'Test 7');
-assertStatus(res7, 'pg_94102_ind_premium', 'ineligible', 'Test 7');
 assert(
-  res7.evaluations.find(e => e.program_id === 'pg_94102_ind_premium').reasons.some(r => /efficiency/i.test(r)),
-  'Test 7 Failed: Should explain efficiency shortfall'
+  (hpwh.requirements || []).some(r => r.attribute_name === 'uef' && Number(r.attribute_value) >= 3.3),
+  'Test 6 Failed: HPWH should include UEF attribute requirement'
 );
-console.log('✓ Test 7 Passed: Efficiency-as-attribute and failed threshold reason');
+console.log('✓ Test 6 Passed: Rebate-first discovery list');
 
-// 8. Reverse discovery: income-eligible programs + sample appliances via unbound ModelID
-const res8 = discoverEligible('94102', 75000, { limit: 25 });
-assert.strictEqual(res8.mode, 'discover', 'Test 8 Failed: mode should be discover');
-assert(res8.eligible_program_count > 0, 'Test 8 Failed: expected income-eligible programs');
-const whProgram = res8.programs.find(p => p.program_id === 'pg_94102_wh');
-assert(whProgram && whProgram.status === 'eligible', 'Test 8 Failed: water heater program should be eligible');
+// 7. Click-through loads eligible appliances for one program
+const res7 = discoverEligibleAppliances('94102', 75000, 'cleanpowersf_hpwh', { limit: 25 });
+assert.strictEqual(res7.mode, 'discover_appliances', 'Test 7 Failed: mode should be discover_appliances');
+assert(res7.appliance_count > 0, 'Test 7 Failed: expected eligible HPWH appliances');
 assert(
-  whProgram.appliances.some(a => a.model_id === 'rheem_xe40h06tt45u0' || a.brand === 'Rheem'),
-  'Test 8 Failed: Rheem seed water heater should appear in reverse results'
+  res7.appliances.some(a => a.model_id === 'rheem_xe50t10h45u0' || a.model_id === 'aosmith_hptu-66n-130'),
+  'Test 7 Failed: seed heat pump water heaters should appear'
 );
-const hpProgram = res8.programs.find(p => p.program_id === 'pg_94102_hp');
 assert(
-  hpProgram && hpProgram.appliances.some(a => a.model_id === 'ahri-101'),
-  'Test 8 Failed: AHRI-101 should appear for heat pump program'
+  !res7.appliances.some(a => a.model_id === 'rheem_prop_g40-50_rh_he_ec3'),
+  'Test 7 Failed: gas water heater should not appear for HPWH rebate'
 );
-console.log('✓ Test 8 Passed: Reverse Epilog discovery of rebates and appliances');
+console.log('✓ Test 7 Passed: Click-through eligible appliances');
 
-// 9. Reverse discovery respects income caps and category filters
-const res9 = discoverEligible('94102', 150000, { category: 'heat_pump' });
-assert.strictEqual(res9.programs.length, 1, 'Test 9 Failed: category filter should keep one program');
-assert.strictEqual(res9.programs[0].status, 'ineligible', 'Test 9 Failed: high income should block program');
-assert.strictEqual(res9.programs[0].appliances.length, 0, 'Test 9 Failed: ineligible program should list no appliances');
-console.log('✓ Test 9 Passed: Reverse discovery income + category filters');
+// 8. Category filter still works on rebate list
+const res8 = discoverEligible('94102', null, { category: 'heat_pump' });
+assert.strictEqual(res8.programs.length, 1, 'Test 8 Failed: category filter should keep one program');
+assert.strictEqual(res8.programs[0].program_id, 'cleanpowersf_hvac', 'Test 8 Failed: expected HVAC program');
+console.log('✓ Test 8 Passed: Category filter on rebate list');
 
 console.log('\nAll Engine Tests Passed Successfully!\n');

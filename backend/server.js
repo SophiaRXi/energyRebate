@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { evaluateRebates, discoverEligible } = require('./engine');
+const { evaluateRebates, discoverEligible, discoverEligibleAppliances } = require('./engine');
 
 const app = express();
 
@@ -43,6 +43,31 @@ app.post('/api/discover', (req, res) => {
       answers: answers || {},
       limit: limit || 25
     });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/discover/appliances', (req, res) => {
+  const { zipCode, income, programId, brand, limit, answers } = req.body;
+
+  if (!zipCode || !programId) {
+    return res.status(400).json({ error: 'Missing required fields: zipCode, programId' });
+  }
+
+  try {
+    const result = discoverEligibleAppliances(
+      zipCode,
+      income === undefined || income === null || income === '' ? null : Number(income),
+      programId,
+      {
+        brand: brand || null,
+        answers: answers || {},
+        limit: limit || 25
+      }
+    );
+    if (result.error) return res.status(404).json(result);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

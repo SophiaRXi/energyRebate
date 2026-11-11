@@ -80,12 +80,14 @@ function mergeAttributes(dbAttributes, overrides = {}) {
   return merged;
 }
 
-function pushRebateFacts(facts, programs, requirements) {
+function pushRebateFacts(facts, programs, requirements, matchedZip = null) {
   for (const r of programs || []) {
+    // SQL already applied zip wildcards (e.g. 941*). Epilog needs an exact
+    // zip atom, so bind the caller's matched ZIP when provided.
     facts.push([
       'rebate_program',
       atom(r.program_id),
-      atom(r.zip_code),
+      atom(matchedZip != null ? matchedZip : r.zip_code),
       atom(r.category),
       atom(r.income_cap),
       atom(r.amount)
@@ -143,7 +145,7 @@ function buildForwardFacts(candidates, zipCode, income, modelId, attributes) {
     attributes,
     rebateCategories
   );
-  pushRebateFacts(facts, candidates.candidateRebates, candidates.requirements);
+  pushRebateFacts(facts, candidates.candidateRebates, candidates.requirements, zipCode);
   return facts;
 }
 
@@ -153,7 +155,7 @@ function buildDiscoveryFacts(zipCode, income, discovery) {
     facts.push(['user_income', atom(income)]);
   }
 
-  pushRebateFacts(facts, discovery.programs, discovery.requirements);
+  pushRebateFacts(facts, discovery.programs, discovery.requirements, zipCode);
 
   const attrsByModel = new Map();
   for (const attr of discovery.attributes || []) {
@@ -480,19 +482,119 @@ function discoverProgramAppliances(zipCode, income, program, requirements, disco
   }));
 }
 
+function requirementMeta(req) {
+  let label = null;
+  try {
+    const meta = JSON.parse(req.condition_json || '{}');
+    label = meta.label || null;
+  } catch {
+    label = null;
+  }
+  return {
+    attribute_name: req.attribute_name,
+    operator: req.operator,
+    attribute_value: req.attribute_value,
+    label
+  };
+}
+
+/** Human-readable equipment rules shown even when some filters are category-only. */
+function equipmentRulesForProgram(program, requirements = []) {
+  const labeled = requirements.map(requirementMeta);
+  const fromAttrs = labeled.map(r => r.label || `${r.attribute_name} ${r.operator} ${r.attribute_value}`);
+  const category = String(program.category || '').toLowerCase();
+  const defaults = {
+    water_heater: [
+      'New ENERGY STAR heat pump water heater',
+      'Electric-only (dual-fuel units are not eligible)'
+    ],
+    heat_pump: [
+      'New ENERGY STAR air-source heat pump',
+      'Electric-only (dual-fuel units are not eligible)'
+    ],
+    induction_stove: [
+      'Permanently installed induction or ENERGY STAR electric cooking product',
+      'Dual-fuel cooking products are not eligible'
+    ],
+    clothes_dryer: [
+      'New ENERGY STAR electric clothes dryer',
+      'Gas dryers are not eligible'
+    ]
+  };
+  const base = defaults[category] || [`ENERGY STAR certified ${category || 'appliance'}`];
+  return [...new Set([...base, ...fromAttrs])];
+}
+
+function effectiveIncomeValue(income, answers = {}) {
+  if (income === null || income === undefined || income === '') {
+    return answers.income ?? null;
+  }
+  return income;
+}
+
+function summarizeProgramCard(program, zipCode, effectiveIncome, answers, reqsByProgram, eligibleProgramIds) {
+  const programId = atom(program.program_id);
+  const assessment = assessProgram(program, effectiveIncome, { ...(answers || {}), zip: zipCode, zip_code: zipCode });
+  const incomeEligible = eligibleProgramIds.has(programId) && assessment.status === 'eligible';
+  const requirements = (reqsByProgram.get(programId) || []).map(requirementMeta);
+
+  return {
+    program_id: program.program_id,
+    category: program.category,
+    amount: program.amount === null ? null : Number(program.amount),
+    income_cap: program.income_cap === null ? null : Number(program.income_cap),
+    benefit_type: assessment.benefit_type,
+    benefit: assessment.benefit,
+    program_name: assessment.program_name,
+    provider: assessment.provider,
+    valid_from: assessment.valid_from,
+    valid_to: assessment.valid_to,
+    source_url: program.source_url || null,
+    verified_at: program.verified_at || null,
+    status: incomeEligible ? 'eligible' : assessment.status,
+    reasons: [
+      ...assessment.missing.map(question => `Need to confirm: ${question.question}`),
+      ...assessment.failed.map(reason => `Does not meet: ${reason}`),
+      ...(!eligibleProgramIds.has(programId) && assessment.status === 'eligible'
+        ? [`Income $${Number(effectiveIncome)} is not below the program cap of $${Number(program.income_cap)}`]
+        : [])
+    ],
+    requirements,
+    equipment_rules: equipmentRulesForProgram(program, reqsByProgram.get(programId) || []),
+    questions: assessment.missing
+  };
+}
+
+function incomeEligibleProgramIds(zipCode, effectiveIncome, programs) {
+  const programFacts = [['user_zip', atom(zipCode)]];
+  if (effectiveIncome !== null && effectiveIncome !== undefined && effectiveIncome !== '' && Number.isFinite(Number(effectiveIncome))) {
+    programFacts.push(['user_income', atom(effectiveIncome)]);
+  }
+  pushRebateFacts(programFacts, programs, [], zipCode);
+  indexfacts(programFacts);
+
+  const programMatches = compfinds(
+    ['ProgramID', 'Category', 'Amount', 'IncomeCap'],
+    ['eligible_program', 'ProgramID', 'Category', 'Amount', 'IncomeCap'],
+    programFacts,
+    eligibilityRules
+  );
+  return new Set(
+    (Array.isArray(programMatches) ? programMatches : []).map(m => atom(m[0]))
+  );
+}
+
 /**
- * Reverse mode: zip + income → eligible programs and buyable appliances.
- * Uses the same eligible_rebate rule with ModelID left unbound, queried per program
- * so Epilog stays fast against the large ENERGY STAR catalog.
+ * Reverse mode step 1: ZIP (+ optional income/filters) → rebate program list.
+ * Appliances are loaded separately when the user opens a program.
  */
 function discoverEligible(zipCode, income, options = {}) {
-  const effectiveIncome = income === null || income === undefined || income === ''
-    ? ((options.answers || {}).income ?? null)
-    : income;
+  const effectiveIncome = effectiveIncomeValue(income, options.answers || {});
   const discovery = getDiscoveryCandidates(zipCode, {
     category: options.category || null,
     brand: options.brand || null,
-    limit: options.limit || 25
+    limit: options.limit || 25,
+    includeAppliances: false
   });
 
   const reqsByProgram = new Map();
@@ -502,104 +604,22 @@ function discoverEligible(zipCode, income, options = {}) {
     reqsByProgram.get(id).push(req);
   }
 
-  // Income/ZIP program eligibility with a tiny fact set (no appliances).
-  const programFacts = [['user_zip', atom(zipCode)]];
-  if (effectiveIncome !== null && effectiveIncome !== undefined && effectiveIncome !== '' && Number.isFinite(Number(effectiveIncome))) {
-    programFacts.push(['user_income', atom(effectiveIncome)]);
-  }
-  pushRebateFacts(programFacts, discovery.programs, []);
-  indexfacts(programFacts);
+  const eligibleProgramIds = incomeEligibleProgramIds(zipCode, effectiveIncome, discovery.programs);
 
-  const programMatches = compfinds(
-    ['ProgramID', 'Category', 'Amount', 'IncomeCap'],
-    ['eligible_program', 'ProgramID', 'Category', 'Amount', 'IncomeCap'],
-    programFacts,
-    eligibilityRules
-  );
-  const eligibleProgramIds = new Set(
-    (Array.isArray(programMatches) ? programMatches : []).map(m => atom(m[0]))
-  );
-
-  const matchedByProgram = new Map();
-  for (const program of discovery.programs) {
-    const programId = atom(program.program_id);
-    if (!eligibleProgramIds.has(programId)) {
-      matchedByProgram.set(programId, []);
-      continue;
-    }
-    matchedByProgram.set(
-      programId,
-      discoverProgramAppliances(
-        zipCode,
-        effectiveIncome,
-        program,
-        reqsByProgram.get(programId) || [],
-        discovery
-      )
-    );
-  }
-
-  const allModelIds = [...new Set(
-    [...matchedByProgram.values()].flatMap(rows => rows.map(r => r.model_id))
-  )];
-  const summaries = getApplianceSummaries(allModelIds);
-  const summaryById = new Map(summaries.map(s => [atom(s.model_id), s]));
-
-  const programs = discovery.programs.map(program => {
-    const programId = atom(program.program_id);
-    const assessment = assessProgram(program, effectiveIncome, { ...(options.answers || {}), zip: zipCode, zip_code: zipCode });
-    const incomeEligible = eligibleProgramIds.has(programId) && assessment.status === 'eligible';
-    const matched = matchedByProgram.get(programId) || [];
-    const appliances = matched.map(row => {
-      const summary = summaryById.get(row.model_id) || {
-        model_id: row.model_id,
-        brand: null,
-        category: program.category,
-        model_number: null,
-        model_name: null,
-        highlights: {}
-      };
-      return {
-        ...summary,
-        rebate_amount: row.amount
-      };
-    });
-
-    const poolSize = (discovery.appliancesByProgram[program.program_id] || []).length;
-
-    return {
-      program_id: program.program_id,
-      category: program.category,
-      amount: program.amount === null ? null : Number(program.amount),
-      income_cap: program.income_cap === null ? null : Number(program.income_cap),
-      benefit_type: assessment.benefit_type,
-      benefit: assessment.benefit,
-      program_name: assessment.program_name,
-      provider: assessment.provider,
-      valid_from: assessment.valid_from,
-      valid_to: assessment.valid_to,
-      source_url: program.source_url || null,
-      verified_at: program.verified_at || null,
-      status: incomeEligible ? 'eligible' : assessment.status,
-      reasons: [
-        ...assessment.missing.map(question => `Need to confirm: ${question.question}`),
-        ...assessment.failed.map(reason => `Does not meet: ${reason}`),
-        ...(!eligibleProgramIds.has(programId) && assessment.status === 'eligible'
-          ? [`Income $${Number(effectiveIncome)} is not below the program cap of $${Number(program.income_cap)}`]
-          : [])
-      ],
-      requirements: (reqsByProgram.get(programId) || []).map(r => ({
-        attribute_name: r.attribute_name,
-        operator: r.operator,
-        attribute_value: r.attribute_value
-      })),
-      questions: assessment.missing,
-      appliances,
-      appliance_count: appliances.length,
-      candidate_pool_size: poolSize,
-      more_appliances_available: poolSize >= discovery.limit
-    };
-  });
+  const programs = discovery.programs.map(program => ({
+    ...summarizeProgramCard(
+      program,
+      zipCode,
+      effectiveIncome,
+      options.answers || {},
+      reqsByProgram,
+      eligibleProgramIds
+    ),
+    appliances: [],
+    appliance_count: 0,
+    candidate_pool_size: 0,
+    more_appliances_available: false
+  }));
 
   return {
     mode: 'discover',
@@ -613,8 +633,96 @@ function discoverEligible(zipCode, income, options = {}) {
     programs,
     eligible_program_count: programs.filter(p => p.status === 'eligible').length,
     needs_input_program_count: programs.filter(p => p.status === 'needs_input').length,
-    eligible_appliance_count: allModelIds.length
+    eligible_appliance_count: 0
   };
 }
 
-module.exports = { evaluateRebates, discoverEligible, mergeAttributes };
+/**
+ * Reverse mode step 2: open one rebate → sample appliances that meet its equipment rules.
+ */
+function discoverEligibleAppliances(zipCode, income, programId, options = {}) {
+  const effectiveIncome = effectiveIncomeValue(income, options.answers || {});
+  const discovery = getDiscoveryCandidates(zipCode, {
+    programId,
+    brand: options.brand || null,
+    limit: options.limit || 25,
+    includeAppliances: true
+  });
+
+  if (!discovery.programs.length) {
+    return {
+      mode: 'discover_appliances',
+      zip_code: String(zipCode),
+      income: effectiveIncome === null ? null : Number(effectiveIncome),
+      program: null,
+      appliances: [],
+      appliance_count: 0,
+      more_appliances_available: false,
+      error: `No program found for ${programId} in ZIP ${zipCode}`
+    };
+  }
+
+  const program = discovery.programs[0];
+  const requirements = discovery.requirements || [];
+  const reqsByProgram = new Map([[atom(program.program_id), requirements]]);
+  const eligibleProgramIds = incomeEligibleProgramIds(zipCode, effectiveIncome, [program]);
+  const card = summarizeProgramCard(
+    program,
+    zipCode,
+    effectiveIncome,
+    options.answers || {},
+    reqsByProgram,
+    eligibleProgramIds
+  );
+
+  const matched = discoverProgramAppliances(
+    zipCode,
+    effectiveIncome,
+    program,
+    requirements,
+    discovery
+  );
+  const summaries = getApplianceSummaries(matched.map(row => row.model_id));
+  const summaryById = new Map(summaries.map(s => [atom(s.model_id), s]));
+  const appliances = matched.map(row => {
+    const summary = summaryById.get(row.model_id) || {
+      model_id: row.model_id,
+      brand: null,
+      category: program.category,
+      model_number: null,
+      model_name: null,
+      highlights: {}
+    };
+    return {
+      ...summary,
+      rebate_amount: row.amount
+    };
+  });
+
+  const poolSize = (discovery.appliancesByProgram[program.program_id] || []).length;
+
+  return {
+    mode: 'discover_appliances',
+    zip_code: String(zipCode),
+    income: effectiveIncome === null ? null : Number(effectiveIncome),
+    filters: {
+      brand: options.brand || null,
+      limit: discovery.limit
+    },
+    program: {
+      ...card,
+      candidate_pool_size: poolSize,
+      more_appliances_available: poolSize >= discovery.limit
+    },
+    appliances,
+    appliance_count: appliances.length,
+    more_appliances_available: poolSize >= discovery.limit
+  };
+}
+
+module.exports = {
+  evaluateRebates,
+  discoverEligible,
+  discoverEligibleAppliances,
+  mergeAttributes
+};

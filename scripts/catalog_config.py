@@ -18,6 +18,7 @@ ALLOWED_CATEGORIES = {
     'induction_stove',
     'room_air_conditioner',
     'clothes_washer',
+    'clothes_dryer',
     'dishwasher',
     'refrigerator',
     'freezer',
@@ -72,6 +73,8 @@ def category_from_dataset(name: str) -> str:
         return 'room_air_conditioner'
     if 'residential_clothes_washer' in slug or slug == 'commercial_clothes_washers':
         return 'clothes_washer'
+    if 'clothes_dryer' in slug:
+        return 'clothes_dryer'
     if 'residential_dishwasher' in slug or 'commercial_dishwasher' in slug:
         return 'dishwasher'
     if 'residential_refrigerator' in slug:

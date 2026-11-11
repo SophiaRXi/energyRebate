@@ -160,6 +160,7 @@ function categoriesMatchingRebate(rebateCategory) {
   if (cat === 'heat_pump') return ['heat_pump'];
   if (cat === 'water_heater') return ['water_heater'];
   if (cat === 'induction_stove') return ['induction_stove', 'electric_cooking'];
+  if (cat === 'clothes_dryer') return ['clothes_dryer'];
   return [cat];
 }
 
@@ -460,10 +461,17 @@ function getApplianceSummaries(modelIds) {
 }
 
 /**
- * Bundle programs + bounded appliance pools for reverse Epilog evaluation.
+ * Bundle programs (+ optional appliance pools) for reverse Epilog evaluation.
+ * Pass includeAppliances:false for a fast rebate list; pass programId to load
+ * one program's candidate appliances on demand.
  */
 function getDiscoveryCandidates(zipCode, options = {}) {
-  const programs = getProgramsForZip(zipCode, options.category || null);
+  let programs = getProgramsForZip(zipCode, options.category || null);
+  if (options.programId) {
+    const wanted = String(options.programId).trim().toLowerCase();
+    programs = programs.filter(p => String(p.program_id).toLowerCase() === wanted);
+  }
+
   const requirements = getRequirementsForPrograms(programs.map(p => p.program_id));
   const reqsByProgram = new Map();
   for (const req of requirements) {
@@ -472,18 +480,23 @@ function getDiscoveryCandidates(zipCode, options = {}) {
   }
 
   const limit = Math.max(1, Math.min(Number(options.limit) || 25, 100));
+  // Rebate list is programs-only; load appliances when a programId is requested
+  // or the caller explicitly opts in.
+  const includeAppliances = Boolean(options.programId) || options.includeAppliances === true;
   const appliancesByProgram = {};
   const applianceMap = new Map();
 
-  for (const program of programs) {
-    const pool = getAppliancesForProgram(
-      program,
-      reqsByProgram.get(program.program_id) || [],
-      { limit, brand: options.brand }
-    );
-    appliancesByProgram[program.program_id] = pool.map(a => a.model_id);
-    for (const appliance of pool) {
-      applianceMap.set(appliance.model_id, appliance);
+  if (includeAppliances) {
+    for (const program of programs) {
+      const pool = getAppliancesForProgram(
+        program,
+        reqsByProgram.get(program.program_id) || [],
+        { limit, brand: options.brand }
+      );
+      appliancesByProgram[program.program_id] = pool.map(a => a.model_id);
+      for (const appliance of pool) {
+        applianceMap.set(appliance.model_id, appliance);
+      }
     }
   }
 
@@ -522,6 +535,16 @@ function getDiscoveryCandidates(zipCode, options = {}) {
   };
 }
 
+function getProgramById(programId) {
+  const key = String(programId || '').trim().toLowerCase();
+  if (!key) return null;
+  return db.prepare(
+    `SELECT ${PROGRAM_FIELDS}
+     FROM rebates
+     WHERE LOWER(program_id) = ?`
+  ).get(key) || null;
+}
+
 function categoryAliasesFor(category, attributes = []) {
   const cat = String(category).toLowerCase();
   const aliases = new Set([cat]);
@@ -549,6 +572,9 @@ function categoryAliasesFor(category, attributes = []) {
   if (cat.includes('clothes_washer')) {
     aliases.add('clothes_washer');
   }
+  if (cat.includes('clothes_dryer')) {
+    aliases.add('clothes_dryer');
+  }
   if (cat.includes('dishwasher')) {
     aliases.add('dishwasher');
   }
@@ -563,6 +589,7 @@ module.exports = {
   getCandidateFacts,
   findAppliance,
   getDiscoveryCandidates,
+  getProgramById,
   getApplianceSummaries,
   getRetailListings,
   getRequirementsForPrograms
